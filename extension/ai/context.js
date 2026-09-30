@@ -3,7 +3,7 @@
 export function buildMessages({ context, userPrompt }) {
   const ctx = context || {};
   const sections = [
-    `你是一个 B 站视频助手。当前用户正在看一个视频，标题：「${ctx.title || "未知"}」`,
+    `你是一个 YouTube视频助手。当前用户正在看一个视频，标题：「${ctx.title || "未知"}」`,
     `作者：${ctx.author || "未知"} | 上传日期：${ctx.uploadDate || "未知"}`
   ];
 

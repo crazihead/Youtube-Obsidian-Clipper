@@ -1,8 +1,8 @@
 const DEFAULT_SETTINGS = {
-  noteFolder: "Clippings/Bilibili",
+  noteFolder: "Clippings/YouTube",
   obsidianApiBaseUrl: "http://127.0.0.1:27123",
   obsidianApiKey: "",
-  tags: "clippings,bilibili",
+  tags: "clippings,youtube",
   downloadFormat: "srt",
   includeDateInFilename: true,
   includeHotCommentsInNote: false,
@@ -20,8 +20,7 @@ const DEFAULT_SETTINGS = {
   frontmatterFields: [
     "title",
     "url",
-    "bvid",
-    "cid",
+    "videoId",
     "author",
     "upload_date",
     "subtitle_lang",
@@ -33,19 +32,13 @@ const DEFAULT_SETTINGS = {
 };
 const PLAYER_AI_ICON_VARIANT = "badge";
 
-const BOC_VERSION = "1.1.3";
+const YOC_VERSION = "2.0.0";
 const CACHE_KEY_PREFIX = "boc_subtitle_cache_";
-globalThis.__BOC_CONTENT_SCRIPT_LOADED__ = BOC_VERSION;
+globalThis.__YOC_CONTENT_SCRIPT_LOADED__ = YOC_VERSION;
 const state = {
   currentUrl: location.href,
   fetchRunId: 0,
-  bvid: "",
-  aid: "",
-  cid: "",
-  cidSource: "",
-  pageIndex: 1,
-  pageCount: 0,
-  pageTitle: "",
+  videoId: "",
   videoDuration: 0,
   description: "",
   title: "",
@@ -128,7 +121,7 @@ function formatLocalDate(value = Date.now()) {
 
 function isReaderMode(url = location.href) {
   try {
-    return new URL(url).searchParams.get("boc_reader") === "1";
+    return new URL(url).searchParams.get("yoc_reader") === "1";
   } catch {
     return false;
   }
@@ -137,7 +130,7 @@ function isReaderMode(url = location.href) {
 function stripReaderModeUrl(url = location.href) {
   try {
     const parsed = new URL(url);
-    parsed.searchParams.delete("boc_reader");
+    parsed.searchParams.delete("yoc_reader");
     return parsed.toString();
   } catch {
     return url;
@@ -155,16 +148,15 @@ function replaceReaderModeUrl(nextUrl) {
     state.currentUrl = location.href;
     state.currentClipSignature = computeCurrentClipSignature(location.href);
   } catch (error) {
-    logWarn("[BOC] failed to replace reader mode url", error);
+    logWarn("[YOC] failed to replace reader mode url", error);
   }
 }
 
-function isWatchlaterPage(url = location.href) {
-  try {
-    return new URL(url).pathname.replace(/\/+$/, "") === "/list/watchlater";
-  } catch {
-    return false;
-  }
+function isWatchlaterPage(_url = location.href) {
+  // YouTube doesn't have a Bilibili-style watchlater list page that needs
+  // special reader-mode handling. Always return false so callers fall through
+  // to the normal video-page branch.
+  return false;
 }
 
 function getReaderContentMaxPx() {
@@ -202,12 +194,12 @@ function clearNativeReaderFloatingStyles(playerHost = state.readingPlayerHost) {
   while (current && current !== document.body && depth < 8) {
     if (
       current.matches?.(
-        ".bpx-player-container, .bpx-docker, .bpx-player-video-area, .bpx-player-primary-area, #bilibili-player, #playerWrap, .player-wrap"
+        "#player, #player, .ytp-video, .ytp-video, #movie_player, #player, .html5-video-container"
       )
     ) {
       targets.push(current);
     }
-    if (current.id === "playerWrap") {
+    if (current.id === "player") {
       break;
     }
     current = current.parentElement;
@@ -233,10 +225,10 @@ function clearNativeReaderFloatingStyles(playerHost = state.readingPlayerHost) {
 
 function getReaderPlayerWrapNode(playerHost = state.readingPlayerHost) {
   return (
-    playerHost?.closest?.("#playerWrap") ||
-    playerHost?.closest?.(".player-wrap") ||
-    document.getElementById("playerWrap") ||
-    document.querySelector(".player-wrap")
+    playerHost?.closest?.("#player") ||
+    playerHost?.closest?.(".html5-video-container") ||
+    document.getElementById("player") ||
+    document.querySelector(".html5-video-container")
   );
 }
 
@@ -306,9 +298,9 @@ function logWarn(...args) {
 
 function installReaderDebugHelpers() {
   const snapshotReader = (label = "manual") => createReaderDebugSnapshot(label);
-  globalThis.__BOC_READER_DEBUG_SNAPSHOT__ = snapshotReader;
-  globalThis.__BOC_DEBUG__ = {
-    ...(globalThis.__BOC_DEBUG__ || {}),
+  globalThis.__YOC_READER_DEBUG_SNAPSHOT__ = snapshotReader;
+  globalThis.__YOC_DEBUG__ = {
+    ...(globalThis.__YOC_DEBUG__ || {}),
     snapshotReader
   };
 }
@@ -356,7 +348,7 @@ const ids = {
 init();
 
 function init() {
-  logInfo(`[BOC] content script loaded, version=${BOC_VERSION}`);
+  logInfo(`[YOC] content script loaded, version=${YOC_VERSION}`);
   ensureUiReady({ forceRecreate: true });
   installReaderDebugHelpers();
 
@@ -532,7 +524,7 @@ function bindRuntimeEvents() {
       }
       if (!state.readingViewOpen) {
         enterReaderMode().catch((error) => {
-          logWarn("[BOC] reading mode trigger failed", error);
+          logWarn("[YOC] reading mode trigger failed", error);
         });
       }
       sendResponse({ ok: true });
@@ -549,7 +541,7 @@ function bindRuntimeEvents() {
           : "";
       } catch (e) {
         subtitleMarkdown = "";
-        logWarn("[BOC] sidepanel-get-context: buildMarkdown failed", e);
+        logWarn("[YOC] sidepanel-get-context: buildMarkdown failed", e);
       }
       sendResponse({
         ok: true,
@@ -558,12 +550,7 @@ function bindRuntimeEvents() {
           title: state.title || "",
           author: state.author || "",
           uploadDate: state.uploadDate || "",
-          bvid: state.bvid || "",
-          cid: state.cid || "",
-          aid: state.aid || "",
-          pageIndex: Number(state.pageIndex) > 0 ? Number(state.pageIndex) : 1,
-          pageCount: Number(state.pageCount) > 0 ? Number(state.pageCount) : 0,
-          pageTitle: state.pageTitle || "",
+          videoId: state.videoId || "",
           subtitleBody: body,
           subtitleMarkdown,
           subtitleLang: state.selectedSubtitleLang || "",
@@ -577,19 +564,7 @@ function bindRuntimeEvents() {
     }
 
     if (message.type === "sidepanel-get-hot-comments") {
-      const count = 20; // 固定取前 20 条热门评论
-      if (!count) {
-        sendResponse({ ok: true, comments: [] });
-        return false;
-      }
-
-      if (!getCurrentAid()) {
-        state.hotComments = [];
-        sendResponse({ ok: true, comments: [], note: "无法获取视频 aid" });
-        return false;
-      }
-
-      fetchHotComments(count)
+      fetchHotComments(20)
         .then((hotComments) => {
           state.hotComments = hotComments;
           sendResponse({ ok: true, comments: hotComments });
@@ -660,7 +635,7 @@ function bindSettingsWatcher() {
         schedulePlayerAiQuickActionSync();
       })
       .catch((error) => {
-        logWarn("[BOC] failed to refresh settings after storage change", error);
+        logWarn("[YOC] failed to refresh settings after storage change", error);
       });
   });
 }
@@ -707,8 +682,8 @@ function buildUiHtml() {
         <section class="boc-reading-stage">
           <header class="boc-reading-header">
             <div class="boc-reading-header-copy">
-              <strong class="boc-reading-title">${escapeHtml(state.title || "B站字幕阅读")}</strong>
-              <div id="${ids.readingMeta}" class="boc-reading-meta">bilibili.com</div>
+              <strong class="boc-reading-title">${escapeHtml(state.title || "YouTube字幕阅读")}</strong>
+              <div id="${ids.readingMeta}" class="boc-reading-meta">youtube.com</div>
             </div>
             <div class="boc-reading-actions">
               <button id="${ids.readingThemeSelect}" type="button" class="boc-reading-icon-btn" title="主题" aria-label="切换主题">
@@ -890,7 +865,7 @@ function bindUiEvents() {
         syncReadingViewPlayback(true);
       })
       .catch((error) => {
-        logWarn("[BOC] failed to switch subtitle in reading view", error);
+        logWarn("[YOC] failed to switch subtitle in reading view", error);
       });
   });
 
@@ -975,13 +950,7 @@ function startUrlWatcher() {
 }
 
 function resetClipState() {
-  state.bvid = "";
-  state.aid = "";
-  state.cid = "";
-  state.cidSource = "";
-  state.pageIndex = 1;
-  state.pageCount = 0;
-  state.pageTitle = "";
+  state.videoId = "";
   state.videoDuration = 0;
   state.description = "";
   state.title = "";
@@ -1028,55 +997,26 @@ async function refreshClip() {
     state.settings = await getSettings();
     ensureRunActive(runId);
 
-    state.bvid = extractBvid(location.href);
-    if (!state.bvid) {
-      throw new Error("当前页面不是标准 BV 视频地址，无法抓取字幕。");
+    state.videoId = extractVideoId(location.href);
+    if (!state.videoId) {
+      throw new Error("当前页面不是有效的 YouTube 视频地址，无法抓取字幕。");
     }
 
-    const pageIndex = extractPageIndex(location.href);
-    const oid = extractOid(location.href);
-    const hasPageParam = hasExplicitPageParam(location.href);
-    const meta = await retryAsync(() => fetchVideoMeta(state.bvid), 2, 250);
+    const meta = await retryAsync(() => fetchVideoMeta(state.videoId), 2, 250);
     ensureRunActive(runId);
 
-    // 调试：打印 API 返回的原始数据
-    logInfo("[BOC] raw meta data", {
+    // 调试：打印原始数据
+    logInfo("[YOC] raw meta data", {
       meta,
-      defaultCid: meta.defaultCid,
-      pagesCount: (meta.pages || []).length
+      videoId: meta.videoId
     });
 
-    state.aid = meta.aid || "";
     state.title = meta.title || readVideoTitle();
     state.author = meta.author || readVideoAuthor();
     state.uploadDate = meta.uploadDate || readUploadDate();
     state.description = meta.description || readVideoDescription();
-    state.pageCount = Array.isArray(meta.pages) ? meta.pages.length : 0;
     state.currentClipSignature = computeCurrentClipSignature();
-    let resolvedPageIndex = pageIndex;
-    if ((meta.pages || []).length > 1 && !hasPageParam) {
-      const pageIndexFromOid = pickPageIndexFromOid(meta.pages, oid);
-      if (pageIndexFromOid > 0) {
-        resolvedPageIndex = pageIndexFromOid;
-        logInfo("[BOC] resolved page index from oid", {
-          oid,
-          resolvedPageIndex
-        });
-      } else {
-        // B 站多分P中，P1 常见为无 ?p= 参数；watchlater 等页面可能改用 oid 标识当前分P。
-        resolvedPageIndex = 1;
-        logInfo("[BOC] multi-page video without p param or valid oid, fallback to P1", {
-          oid
-        });
-      }
-    }
-
-    const currentPage = pickPageFromPages(meta.pages, resolvedPageIndex);
-    state.pageIndex = resolvedPageIndex;
-    state.pageTitle = currentPage?.part || "";
-    state.cid = currentPage?.cid || pickCidFromPages(meta.pages, resolvedPageIndex, meta.defaultCid);
-    state.cidSource = "meta-pages";
-    state.videoDuration = pickDurationFromPages(meta.pages, resolvedPageIndex, meta.defaultDuration);
+    state.videoDuration = Number(meta.duration) > 0 ? Number(meta.duration) : 0;
     if (!(state.videoDuration > 0)) {
       state.videoDuration = readRuntimeVideoDuration();
     }
@@ -1084,27 +1024,19 @@ async function refreshClip() {
       throw new Error("无法获取当前视频时长，已停止抓取以避免串到错误字幕。");
     }
 
-    logInfo("[BOC] resolved video ids", {
+    logInfo("[YOC] resolved video info", {
       url: location.href,
-      aid: state.aid,
-      bvid: state.bvid,
-      cid: state.cid,
-      cidSource: state.cidSource,
-      pageIndex: resolvedPageIndex,
+      videoId: state.videoId,
       videoDuration: state.videoDuration
     });
 
     setStatus("正在获取可用字幕...");
-    let subtitleBundle = await retryAsync(
-      () => fetchSubtitleBundle(state.bvid, state.cid, state.aid),
-      3,
-      500
-    );
+    let subtitleBundle = await retryAsync(() => fetchSubtitleBundle(state.videoId), 3, 500);
     ensureRunActive(runId);
     state.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
     state.chapters = normalizeChapters(subtitleBundle.chapters);
     logInfo(
-      "[BOC] chapters",
+      "[YOC] chapters",
       state.chapters.map((item) => ({
         from: item.from,
         to: item.to,
@@ -1112,12 +1044,13 @@ async function refreshClip() {
       }))
     );
     logInfo(
-      "[BOC] subtitle tracks",
+      "[YOC] subtitle tracks",
       state.subtitles.map((item) => ({
         id: item.id,
         lan: item.lan,
         lanDoc: item.lanDoc,
-        url: item.subtitleUrl
+        url: item.subtitleUrl,
+        isAsr: item.isAsr
       }))
     );
 
@@ -1175,11 +1108,7 @@ async function refreshClip() {
       }
 
       // Retry because subtitle signed URLs may expire quickly or hit rate limit.
-      subtitleBundle = await retryAsync(
-        () => fetchSubtitleBundle(state.bvid, state.cid, state.aid),
-        2,
-        500
-      );
+      subtitleBundle = await retryAsync(() => fetchSubtitleBundle(state.videoId), 2, 500);
       ensureRunActive(runId);
       state.subtitles = normalizeSubtitleTracks(subtitleBundle.tracks);
       state.chapters = normalizeChapters(subtitleBundle.chapters);
@@ -1196,7 +1125,7 @@ async function refreshClip() {
     }
     ensureRunActive(runId);
     if (selected) {
-      logInfo("[BOC] selected subtitle track", {
+      logInfo("[YOC] selected subtitle track", {
         id: selected.id,
         lan: selected.lan,
         lanDoc: selected.lanDoc
@@ -1267,8 +1196,7 @@ async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitleId = ""
   }
 
   const cacheKey = getSubtitleCacheKey({
-    bvid: state.bvid,
-    cid: state.cid,
+    videoId: state.videoId,
     subtitleId,
     subtitleUrl: url,
     lang
@@ -1280,13 +1208,13 @@ async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitleId = ""
     if (cachedBody && Array.isArray(cachedBody) && cachedBody.length > 0) {
       const cachedCheck = validateSubtitleByDuration(cachedBody, state.videoDuration);
       if (!cachedCheck.ok) {
-        logWarn("[BOC] cached subtitle duration mismatch, clearing cache", {
+        logWarn("[YOC] cached subtitle duration mismatch, clearing cache", {
           cacheKey,
           reason: cachedCheck.reason
         });
         await clearSubtitleCacheByKey(cacheKey);
       } else {
-        logInfo("[BOC] using cached subtitle", { cacheKey, itemCount: cachedBody.length });
+        logInfo("[YOC] using cached subtitle", { cacheKey, itemCount: cachedBody.length });
         ensureRunActive(runId);
         state.selectedSubtitleId = subtitleId ? String(subtitleId) : state.selectedSubtitleId;
         state.selectedSubtitleUrl = url;
@@ -1333,9 +1261,9 @@ async function loadSubtitle(url, lang, runId = state.fetchRunId, subtitleId = ""
   }
 }
 
-function getSubtitleCacheKey({ bvid, cid, subtitleId = "", subtitleUrl = "", lang = "" }) {
+function getSubtitleCacheKey({ videoId, subtitleId = "", subtitleUrl = "", lang = "" }) {
   const sourceKey = buildSubtitleSourceKey(subtitleId, subtitleUrl, lang);
-  return `${CACHE_KEY_PREFIX}${bvid}_${cid}_${sourceKey}`;
+  return `${CACHE_KEY_PREFIX}${videoId}_${sourceKey}`;
 }
 
 function buildSubtitleSourceKey(subtitleId, subtitleUrl, lang) {
@@ -1385,7 +1313,7 @@ async function saveSubtitleToCache(cacheKey, body) {
       }
     });
   } catch (error) {
-    logWarn("[BOC] failed to save subtitle cache", error);
+    logWarn("[YOC] failed to save subtitle cache", error);
   }
 }
 
@@ -1393,23 +1321,23 @@ async function clearSubtitleCacheByKey(cacheKey) {
   try {
     await chrome.storage.local.remove(cacheKey);
   } catch (error) {
-    logWarn("[BOC] failed to clear subtitle cache by key", { cacheKey, error });
+    logWarn("[YOC] failed to clear subtitle cache by key", { cacheKey, error });
   }
 }
 
-async function clearSubtitleCache(bvid, cid, lang) {
-  const cacheKey = getSubtitleCacheKey({ bvid, cid, lang });
+async function clearSubtitleCache(videoId, lang) {
+  const cacheKey = getSubtitleCacheKey({ videoId, lang });
   try {
     await chrome.storage.local.remove(cacheKey);
-    logInfo("[BOC] cleared subtitle cache", { cacheKey });
+    logInfo("[YOC] cleared subtitle cache", { cacheKey });
   } catch (error) {
-    logWarn("[BOC] failed to clear subtitle cache", error);
+    logWarn("[YOC] failed to clear subtitle cache", error);
   }
 }
 
 function renderMeta() {
   const meta = byId(ids.meta);
-  if (!state.bvid) {
+  if (!state.videoId) {
     meta.innerHTML = '<div class="boc-meta-item">尚未抓取视频信息</div>';
     return;
   }
@@ -1501,7 +1429,7 @@ function getPopupPayload() {
   });
 
   return {
-    contentVersion: BOC_VERSION,
+    contentVersion: YOC_VERSION,
     url: cleanVideoUrl(),
     title: state.title || "",
     author: state.author || "",
@@ -1544,7 +1472,7 @@ async function downloadSubtitle() {
     return;
   }
 
-  const safeTitle = sanitizeFileName(state.title || state.bvid || "bilibili-subtitle");
+  const safeTitle = sanitizeFileName(state.title || state.videoId || "youtube-subtitle");
   const langSuffix = sanitizeFileName(state.selectedSubtitleLang || "subtitle") || "subtitle";
   const filename = `${safeTitle}.${langSuffix}.${format}`;
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
@@ -1926,7 +1854,7 @@ function queueEnsureReaderPlayerMounted() {
   state.readingPlayerMountTimer = window.setTimeout(() => {
     state.readingPlayerMountTimer = 0;
     ensureReaderPlayerMounted({ retries: 12, delayMs: 120, forceLayout: true }).catch((error) => {
-      logWarn("[BOC] ensure reader player mounted failed", error);
+      logWarn("[YOC] ensure reader player mounted failed", error);
     });
   }, 60);
 }
@@ -1937,9 +1865,9 @@ function findReaderPlayerHost(video) {
   }
 
   return (
-    video.closest(".bpx-player-container") ||
-    video.closest(".bpx-player-video-area") ||
-    video.closest("#bilibili-player") ||
+    video.closest("#player") ||
+    video.closest(".ytp-video") ||
+    video.closest("#movie_player") ||
     video.parentElement
   );
 }
@@ -1984,7 +1912,7 @@ function closeReadingView() {
   unbindReaderLayout();
   cleanupReaderPlayerHost();
   clearReaderPageFocus();
-  const sendingBar = document.querySelector(".bpx-player-sending-bar");
+  const sendingBar = document.querySelector(".ytp-nonexistent-sending-bar");
   if (sendingBar) {
     sendingBar.setAttribute("data-boc-reader-hide-sending-bar", "1");
     sendingBar.style.setProperty("display", "none", "important");
@@ -2009,7 +1937,7 @@ function renderReadingView() {
   const hasChapters = chapters.length > 0;
 
   if (titleNode) {
-    titleNode.textContent = state.title || "B站字幕阅读";
+    titleNode.textContent = state.title || "YouTube字幕阅读";
   }
   if (metaNode) {
     metaNode.textContent = buildReadingMetaLine();
@@ -2356,13 +2284,6 @@ function buildReadingSummaryItems() {
   if (state.uploadDate) {
     items.push({ label: "日期", value: state.uploadDate });
   }
-  if (Number(state.pageCount) > 1) {
-    const pageParts = [`P${Number(state.pageIndex) > 0 ? Number(state.pageIndex) : 1}`];
-    if (state.pageTitle) {
-      pageParts.push(state.pageTitle);
-    }
-    items.push({ label: "分P", value: pageParts.join(" ") });
-  }
   return items;
 }
 
@@ -2397,7 +2318,7 @@ function updateReaderPreferences(next, { persist = true } = {}) {
 
 function persistReaderSettings() {
   sendRuntimeMessage({ type: "save-settings", settings: state.settings }).catch((error) => {
-    logWarn("[BOC] failed to persist reader settings", error);
+    logWarn("[YOC] failed to persist reader settings", error);
   });
 }
 
@@ -2409,14 +2330,7 @@ function buildReadingMetaLine() {
   if (state.uploadDate) {
     parts.push(state.uploadDate);
   }
-  parts.push("bilibili.com");
-  if (Number(state.pageCount) > 1) {
-    const pageParts = [`P${Number(state.pageIndex) > 0 ? Number(state.pageIndex) : 1}`];
-    if (state.pageTitle) {
-      pageParts.push(state.pageTitle);
-    }
-    parts.push(pageParts.join(" "));
-  }
+  parts.push("youtube.com");
   if (state.selectedSubtitleLang) {
     parts.push(`字幕：${state.selectedSubtitleLang}`);
   }
@@ -2562,12 +2476,12 @@ function createReaderDebugSnapshot(label = "manual") {
       : null,
     nodes: [
       "#app",
-      "#playerWrap",
-      ".player-wrap",
-      "#bilibili-player",
-      ".bpx-player-container",
-      ".bpx-player-video-area",
-      ".bpx-player-primary-area",
+      "#player",
+      ".html5-video-container",
+      "#movie_player",
+      "#player",
+      ".ytp-video",
+      ".ytp-video",
       "#boc-reading-inline-host",
       "#boc-reading-view"
     ]
@@ -2786,7 +2700,7 @@ function startReaderPlayerObserver() {
     if (nextVideo && nextHost && (nextVideo !== state.readingVideoEl || nextHost !== state.readingPlayerHost)) {
       queueEnsureReaderPlayerMounted();
     }
-    if (document.querySelector(".bpx-player-mini-close, .bpx-player-mini-warp")) {
+    if (document.querySelector(".ytp-nonexistent-mini-close, .ytp-nonexistent-mini-warp")) {
       scheduleReaderMiniPlayerDismiss();
     }
   });
@@ -2886,8 +2800,8 @@ function getRuntimeVideoElement() {
       const host = findReaderPlayerHost(item);
       const inPlayer = Boolean(
         host &&
-          (host.matches?.("#bilibili-player, .bpx-player-container, .bpx-player-video-area") ||
-            host.querySelector?.(".bpx-player-video-area"))
+          (host.matches?.("#movie_player, #player, .ytp-video") ||
+            host.querySelector?.(".ytp-video"))
       );
       const area = Math.max(0, rect.width) * Math.max(0, rect.height);
       const score =
@@ -2912,19 +2826,19 @@ function isIgnoredReaderVideoCandidate(video) {
   const host = findReaderPlayerHost(video);
   const blockedSelector = [
     "[data-boc-reader-hidden='1']",
-    ".bpx-player-mini-warp",
-    ".bpx-player-mini-close",
-    ".bpx-player-ending-panel",
-    ".bpx-player-ending-related",
+    ".ytp-nonexistent-mini-warp",
+    ".ytp-nonexistent-mini-close",
+    ".ytp-endscreen-content",
+    ".ytp-endscreen-content",
     "[class*='mini-player']",
     "[class*='picture-in-picture']",
     "[class*='adcard']",
     ".ad-report",
     "[class*='ad-report']",
-    ".video-page-card-small",
-    ".video-page-special-card-small",
-    ".feed-card",
-    ".bili-video-card"
+    ".ytp-nonexistent-card-small",
+    ".ytp-nonexistent-special-card-small",
+    ".ytp-nonexistent-feed-card",
+    ".ytp-nonexistent-video-card"
   ].join(", ");
   return Boolean(video.closest(blockedSelector) || host?.closest?.(blockedSelector));
 }
@@ -2983,8 +2897,8 @@ function moveReadingMainInline() {
     state.readingMainOriginalNextSibling = readingMain.nextSibling;
   }
   const playerWrap =
-    document.getElementById("playerWrap") ||
-    state.readingPlayerHost?.closest?.("#playerWrap") ||
+    document.getElementById("player") ||
+    state.readingPlayerHost?.closest?.("#player") ||
     state.readingPlayerHost;
   const hostParent = playerWrap?.parentElement;
   if (!playerWrap || !hostParent) {
@@ -3089,14 +3003,14 @@ function hideReaderNoiseNodes(keepRoots = []) {
     }
     if (
       node.closest(
-        "#bilibili-player, .bpx-player-container, .bpx-player-video-area, .bpx-player-primary-area, #boc-root, h1.video-title, .video-info-detail, .video-info-meta, .video-data"
+        "#movie_player, #player, .ytp-video, .ytp-video, #boc-root, h1.ytd-watch-metadata, .ytp-nonexistent-video-info-detail, .ytp-nonexistent-video-info-meta, .ytp-nonexistent-video-data"
       )
     ) {
       return;
     }
     node.setAttribute("data-boc-reader-hidden", "1");
-    const card = node.closest("article, li, .card-box, .video-page-card-small, .video-page-special-card-small, .feed-card, .bili-video-card");
-    if (card && !card.closest("#bilibili-player, .bpx-player-container, .bpx-player-video-area, .bpx-player-primary-area, #boc-root")) {
+    const card = node.closest("article, li, .ytp-nonexistent-card-box, .ytp-nonexistent-card-small, .ytp-nonexistent-special-card-small, .ytp-nonexistent-feed-card, .ytp-nonexistent-video-card");
+    if (card && !card.closest("#movie_player, #player, .ytp-video, .ytp-video, #boc-root")) {
       card.setAttribute("data-boc-reader-hidden", "1");
     }
   });
@@ -3123,7 +3037,7 @@ function markReaderKeepPath(node) {
 
 function findReaderTitleContainer() {
   const title =
-    document.querySelector("h1.video-title") ||
+    document.querySelector("h1.ytd-watch-metadata") ||
     document.querySelector("h1") ||
     document.querySelector("[data-title]");
   if (!title) {
@@ -3147,10 +3061,10 @@ function findReaderMetaContainer(titleNode = findReaderTitleContainer()) {
   ].filter(Boolean);
 
   for (const node of candidates) {
-    if (node.matches?.(".video-data, .video-info-detail, .video-info-meta")) {
+    if (node.matches?.(".ytp-nonexistent-video-data, .ytp-nonexistent-video-info-detail, .ytp-nonexistent-video-info-meta")) {
       return node;
     }
-    if (node.querySelector?.(".view-text")) {
+    if (node.querySelector?.(".ytp-nonexistent-view-text")) {
       return node;
     }
   }
@@ -3185,7 +3099,7 @@ function restoreRootMount() {
 }
 
 function dismissReaderMiniPlayer(playerHost = state.readingPlayerHost) {
-  const explicitClose = Array.from(document.querySelectorAll(".bpx-player-mini-close")).find(isVisibleReaderControl);
+  const explicitClose = Array.from(document.querySelectorAll(".ytp-nonexistent-mini-close")).find(isVisibleReaderControl);
   if (explicitClose) {
     explicitClose.click();
     return true;
@@ -3205,13 +3119,13 @@ function dismissReaderMiniPlayer(playerHost = state.readingPlayerHost) {
     new Set([
       playerHost,
       playerHost.parentElement,
-      playerHost.closest("#playerWrap"),
-      playerHost.closest("#bilibili-player")
+      playerHost.closest("#player"),
+      playerHost.closest("#movie_player")
     ].filter(Boolean))
   );
 
   const selectors = [
-    ".bpx-player-mini-close",
+    ".ytp-nonexistent-mini-close",
     "[class*='mini'][class*='close']",
     "[class*='close']",
     "button[aria-label*='关闭']",
@@ -3291,7 +3205,7 @@ function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180) {
     }
 
     attempts += 1;
-    const miniExists = Boolean(document.querySelector(".bpx-player-mini-close, .bpx-player-mini-warp"));
+    const miniExists = Boolean(document.querySelector(".ytp-nonexistent-mini-close, .ytp-nonexistent-mini-warp"));
     const hostFixed = Boolean(host && window.getComputedStyle(host).position === "fixed");
     if (attempts < maxAttempts && (miniExists || hostFixed || closed)) {
       state.readingMiniDismissTimer = window.setTimeout(run, delayMs);
@@ -3305,17 +3219,17 @@ function scheduleReaderMiniPlayerDismiss(maxAttempts = 12, delayMs = 180) {
 
 function getReaderControlsRoot(playerHost = state.readingPlayerHost) {
   return (
-    playerHost?.closest?.("#playerWrap") ||
-    playerHost?.closest?.("#bilibili-player") ||
+    playerHost?.closest?.("#player") ||
+    playerHost?.closest?.("#movie_player") ||
     playerHost ||
-    document.getElementById("playerWrap") ||
-    document.getElementById("bilibili-player")
+    document.getElementById("player") ||
+    document.getElementById("movie_player")
   );
 }
 
 function getReaderPlayerControlsState(playerHost = state.readingPlayerHost) {
   const controlRoot = getReaderControlsRoot(playerHost);
-  const nodes = [".bpx-player-control-wrap", ".bpx-player-control-mask", ".bpx-player-control-entity"].map(
+  const nodes = [".ytp-chrome-bottom", ".ytp-chrome-bottom", ".ytp-chrome-bottom"].map(
     (selector) => {
       const node = controlRoot?.querySelector(selector) || null;
       return {
@@ -3328,7 +3242,7 @@ function getReaderPlayerControlsState(playerHost = state.readingPlayerHost) {
 
   return {
     controlRootFound: Boolean(controlRoot),
-    hostHasNoCursor: Boolean(playerHost?.classList.contains("bpx-state-no-cursor")),
+    hostHasNoCursor: Boolean(playerHost?.classList.contains("ytp-autohide")),
     anyPresent: nodes.some((item) => item.exists),
     anyHidden: nodes.some((item) => item.exists && !item.visible),
     nodes
@@ -3382,7 +3296,7 @@ function queueEnsureReaderPlayerControlsRecovered({
       retryDelayMs: 120
     })
       .catch((error) => {
-        logWarn("[BOC] queued reader controls recovery failed", { reason, error });
+        logWarn("[YOC] queued reader controls recovery failed", { reason, error });
       })
       .finally(() => {
         state.readingControlsRecoveryInFlight = false;
@@ -3401,9 +3315,9 @@ function setReaderPlayerControlsVisible(visible, playerHost = state.readingPlaye
   }
 
   const displayMap = new Map([
-    [".bpx-player-control-wrap", "block"],
-    [".bpx-player-control-mask", "block"],
-    [".bpx-player-control-entity", "block"]
+    [".ytp-chrome-bottom", "block"],
+    [".ytp-chrome-bottom", "block"],
+    [".ytp-chrome-bottom", "block"]
   ]);
 
   displayMap.forEach((displayValue, selector) => {
@@ -3425,15 +3339,15 @@ function setReaderPlayerControlsVisible(visible, playerHost = state.readingPlaye
   });
 
   if (visible) {
-    if (playerHost.classList.contains("bpx-state-no-cursor")) {
-      playerHost.classList.remove("bpx-state-no-cursor");
+    if (playerHost.classList.contains("ytp-autohide")) {
+      playerHost.classList.remove("ytp-autohide");
       playerHost.setAttribute("data-boc-reader-no-cursor-cleared", "1");
     }
     return;
   }
 
   if (playerHost.getAttribute("data-boc-reader-no-cursor-cleared") === "1") {
-    playerHost.classList.add("bpx-state-no-cursor");
+    playerHost.classList.add("ytp-autohide");
     playerHost.removeAttribute("data-boc-reader-no-cursor-cleared");
   }
 }
@@ -3447,7 +3361,7 @@ async function ensureReaderPlayerControlsRecovered(
   }
 
   const before = getReaderPlayerControlsState(playerHost);
-  logInfo("[BOC] reader controls check", {
+  logInfo("[YOC] reader controls check", {
     reason,
     hostClassName: typeof playerHost.className === "string" ? playerHost.className : "",
     hostHasNoCursor: before.hostHasNoCursor,
@@ -3459,7 +3373,7 @@ async function ensureReaderPlayerControlsRecovered(
     return false;
   }
 
-  logInfo("[BOC] recovering normal reader controls", {
+  logInfo("[YOC] recovering normal reader controls", {
     reason,
     hostClassName: typeof playerHost.className === "string" ? playerHost.className : ""
   });
@@ -3467,7 +3381,7 @@ async function ensureReaderPlayerControlsRecovered(
   layoutReaderPlayerHost();
 
   let after = getReaderPlayerControlsState(playerHost);
-  logInfo("[BOC] reader controls after recovery", {
+  logInfo("[YOC] reader controls after recovery", {
     reason,
     hostClassName: typeof playerHost.className === "string" ? playerHost.className : "",
     hostHasNoCursor: after.hostHasNoCursor,
@@ -3479,14 +3393,14 @@ async function ensureReaderPlayerControlsRecovered(
   }
 
   await sleep(retryDelayMs);
-  logInfo("[BOC] retrying normal reader controls recovery", {
+  logInfo("[YOC] retrying normal reader controls recovery", {
     reason,
     hostClassName: typeof playerHost.className === "string" ? playerHost.className : ""
   });
   setReaderPlayerControlsVisible(true, playerHost);
   layoutReaderPlayerHost();
   after = getReaderPlayerControlsState(playerHost);
-  logInfo("[BOC] reader controls after retry", {
+  logInfo("[YOC] reader controls after retry", {
     reason,
     hostClassName: typeof playerHost.className === "string" ? playerHost.className : "",
     hostHasNoCursor: after.hostHasNoCursor,
@@ -3794,7 +3708,7 @@ function hasPlayerSubtitleControl() {
 function findPlayerSubtitleControlNode() {
   const controlRoots = Array.from(
     document.querySelectorAll(
-      "#bilibili-player .bpx-player-control-wrap, #playerWrap .bpx-player-control-wrap, .bpx-player-container .bpx-player-control-wrap, #bilibili-player, #playerWrap, .bpx-player-container"
+      "#movie_player .ytp-chrome-bottom, #player .ytp-chrome-bottom, #player .ytp-chrome-bottom, #movie_player, #player, #player"
     )
   );
 
@@ -3831,10 +3745,10 @@ function isPlayerSubtitleControlNode(node) {
 
 function findPlayerAiQuickActionHost() {
   const candidates = [
-    document.querySelector(".bpx-player-container"),
-    document.querySelector(".bpx-player-video-area"),
-    document.getElementById("bilibili-player"),
-    document.getElementById("playerWrap")
+    document.querySelector("#player"),
+    document.querySelector(".ytp-video"),
+    document.getElementById("movie_player"),
+    document.getElementById("player")
   ];
   return candidates.find((node) => node instanceof HTMLElement && isVisibleReaderControl(node)) || null;
 }
@@ -3968,16 +3882,16 @@ function normalizeReaderPlayerContainer(playerHost = state.readingPlayerHost) {
     const computed = window.getComputedStyle(current);
     const className = typeof current.className === "string" ? current.className : "";
     const isPlayerLayoutNode = current.matches?.(
-      ".bpx-player-container, .bpx-player-video-area, .bpx-player-primary-area, .bpx-player-inner, .scroll-sticky, .player-wrap, #playerWrap, #bilibili-player"
+      "#player, .ytp-video, .ytp-video, .ytp-nonexistent-player-inner, .scroll-sticky, .html5-video-container, #player, #movie_player"
     );
     const isExplicitMiniNode = current.matches?.(
-      ".bpx-player-mini-warp, .bpx-player-mini-close, [class*='mini-player'], [class*='picture-in-picture']"
+      ".ytp-nonexistent-mini-warp, .ytp-nonexistent-mini-close, [class*='mini-player'], [class*='picture-in-picture']"
     );
     const hasFloatingPosition = computed.position === "fixed" || computed.position === "sticky";
     const isMiniLike =
       hasFloatingPosition ||
       /mini|picture|float|fixed-player/i.test(className) ||
-      current.matches?.(".bpx-player-mini-warp, .bpx-player-mini-close");
+      current.matches?.(".ytp-nonexistent-mini-warp, .ytp-nonexistent-mini-close");
     const shouldReset = state.readingNativePageMode
       ? Boolean(isExplicitMiniNode || (isPlayerLayoutNode && isMiniLike))
       : isPlayerLayoutNode || isMiniLike;
@@ -4298,9 +4212,8 @@ function updateReaderFollowState() {
 }
 
 function computeCurrentClipSignature(url = location.href) {
-  const bvid = extractBvid(url);
-  const page = extractPageIndex(url);
-  return [bvid, page].map((item) => String(item || "").trim()).join("|");
+  const videoId = extractVideoId(url);
+  return String(videoId || "").trim();
 }
 
 function toReadableText(value, fallback = "") {
@@ -4401,78 +4314,243 @@ function byId(id) {
   return node;
 }
 
-function extractBvid(url) {
-  const match = url.match(/\/video\/(BV[0-9A-Za-z]+)/);
-  if (match?.[1]) {
-    return match[1];
-  }
-
-  try {
-    const parsed = new URL(url);
-    const fromQuery = String(parsed.searchParams.get("bvid") || "").trim();
-    if (/^BV[0-9A-Za-z]+$/.test(fromQuery)) {
-      return fromQuery;
-    }
-  } catch {
-    // ignore invalid URL
-  }
-
+function extractVideoId(url) {
+  // 从 watch?v= 参数提取
+  let match = url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+  if (match?.[1]) return match[1];
+  // 从 youtu.be/ 短链提取
+  match = url.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+  if (match?.[1]) return match[1];
+  // 从 shorts/ 路径提取
+  match = url.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+  if (match?.[1]) return match[1];
+  // 从 embed/ 路径提取
+  match = url.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+  if (match?.[1]) return match[1];
   return "";
 }
 
-function cleanVideoUrl(href = location.href) {
-  try {
-    const parsed = new URL(href);
-    if (parsed.hostname !== "www.bilibili.com") {
-      return href;
-    }
+// 从页面 <script> 标签中提取 ytInitialPlayerResponse 完整 JSON 对象
+// 使用平衡括号算法（而非正则），能正确处理任意深度嵌套
+// 关键：必须精确匹配 "ytInitialPlayerResponse =" 这种赋值模式，
+// 跳过只是引用该变量名的 JS 片段（YouTube 页面有多个这样的空壳 script）
+function extractPlayerResponseFromScripts() {
+  const scripts = document.querySelectorAll("script");
+  for (const script of scripts) {
+    const text = script.textContent || "";
+    if (!text.includes("ytInitialPlayerResponse")) continue;
 
-    if (parsed.pathname === "/list/watchlater" || parsed.pathname === "/list/watchlater/") {
-      const bvid = extractBvid(href);
-      if (bvid) {
-        return `https://www.bilibili.com/video/${bvid}/`;
+    // 精确搜索：找 "ytInitialPlayerResponse" 后面紧跟 "=" 的位置
+    // 这样能排除只是引用变量名的情况（如 window.ytInitialPlayerResponse.xxx）
+    let searchFrom = 0;
+    while (searchFrom < text.length) {
+      const markerIdx = text.indexOf("ytInitialPlayerResponse", searchFrom);
+      if (markerIdx < 0) break;
+      searchFrom = markerIdx + 1;
+
+      // 检查 marker 后面是否紧跟赋值操作
+      // 合法模式: "ytInitialPlayerResponse =" 或 "ytInitialPlayerResponse= {"
+      // 非法模式: "ytInitialPlayerResponse." 或 "ytInitialPlayerResponse["
+      let afterMarker = markerIdx + "ytInitialPlayerResponse".length;
+      // 跳过可选的空格
+      while (afterMarker < text.length && (text[afterMarker] === " " || text[afterMarker] === "\t" || text[afterMarker] === "\n" || text[afterMarker] === "\r")) {
+        afterMarker++;
       }
-      return href;
-    }
+      if (text[afterMarker] !== "=") continue; // 不是赋值，跳过
 
-    const bvid = extractBvid(href);
-    if (!bvid) {
-      return href;
+      // 找到等号
+      const assignIdx = afterMarker;
+      // 等号后跳过空格
+      let braceStart = assignIdx + 1;
+      while (braceStart < text.length && (text[braceStart] === " " || text[braceStart] === "\t" || text[braceStart] === "\n" || text[braceStart] === "\r")) {
+        braceStart++;
+      }
+      if (text[braceStart] !== "{") continue; // 等号后不是 JSON 对象，跳过
+
+      // 平衡括号扫描
+      let depth = 0;
+      let inString = false;
+      let escape = false;
+      let braceEnd = -1;
+      for (let i = braceStart; i < text.length; i++) {
+        const c = text[i];
+        if (escape) { escape = false; continue; }
+        if (c === "\\") { escape = true; continue; }
+        if (c === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (c === "{") depth++;
+        else if (c === "}") {
+          depth--;
+          if (depth === 0) { braceEnd = i + 1; break; }
+        }
+      }
+
+      if (braceEnd > braceStart) {
+        const jsonStr = text.slice(braceStart, braceEnd);
+        try {
+          const full = JSON.parse(jsonStr);
+          // 精简为只返回需要的字段
+          const d = full.videoDetails || {};
+          const tracks = full.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+          if (!d.title && tracks.length === 0) continue; // 空对象，跳过
+          return {
+            videoDetails: {
+              title: d.title || "",
+              author: d.author || "",
+              channelId: d.channelId || "",
+              lengthSeconds: d.lengthSeconds || "0",
+              shortDescription: d.shortDescription || "",
+              videoId: d.videoId || "",
+              isLiveContent: d.isLiveContent || false,
+              thumbnailUrl: d.thumbnail?.thumbnails?.slice(-1)[0]?.url || ""
+            },
+            captionTracks: tracks.map((t) => ({
+              vssId: t.vssId || "",
+              baseUrl: t.baseUrl || "",
+              name: t.name?.simpleText || t.name || "",
+              languageCode: t.languageCode || "",
+              kind: t.kind || "" // "asr" = 自动字幕
+            }))
+          };
+        } catch (e) {
+          logWarn("[YOC] JSON parse from script tag failed", {
+            error: e?.message,
+            length: jsonStr.length,
+            preview: jsonStr.slice(0, 100)
+          });
+        }
+      }
     }
-    const p = parsed.searchParams.get("p");
-    const qs = p ? `?p=${encodeURIComponent(p)}` : "";
-    return `https://www.bilibili.com/video/${bvid}/${qs}`;
-  } catch {
+  }
+  return null;
+}
+
+// 从页面 HTML 里提取 INNERTUBE_API_KEY
+function extractInnerTubeApiKey() {
+  // 先试试 window 对象（如果可访问）
+  try {
+    // 从所有 script 标签里搜
+    const scripts = document.querySelectorAll("script");
+    for (const s of scripts) {
+      const t = s.textContent || "";
+      const m = t.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/);
+      if (m) return m[1];
+    }
+  } catch {}
+  // 从整个 HTML 里搜
+  const html = document.documentElement?.innerHTML || "";
+  const m = html.match(/"INNERTUBE_API_KEY"\s*:\s*"([^"]+)"/);
+  return m?.[1] || "";
+}
+
+async function getYtPlayerResponse() {
+  const videoId = extractVideoId(location.href);
+  const apiKey = extractInnerTubeApiKey();
+
+  console.log("[YOC] getYtPlayerResponse START", { videoId, hasKey: !!apiKey });
+
+  // 🎯 核心方案：content script 直接 ANDROID client POST /youtubei/v1/player
+  // 这是唯一能拿到**不带 exp=xpe 参数**的 timedtext URL 的方式
+  // 直接 fetch 不经过 background，更简单可靠
+  if (videoId && apiKey) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await sleep(500);
+      try {
+        const url = `https://www.youtube.com/youtubei/v1/player?key=${apiKey}&prettyPrint=false`;
+        const body = {
+          context: { client: { clientName: "ANDROID", clientVersion: "20.10.38" } },
+          videoId
+        };
+        console.log("[YOC] ANDROID player POST attempt", { attempt, urlPreview: url.slice(0, 80) });
+
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          cache: "no-store"
+        });
+        console.log("[YOC] ANDROID player HTTP", resp.status);
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+
+        const data = await resp.json();
+        const playStatus = data?.playabilityStatus?.status;
+        console.log("[YOC] ANDROID playability:", playStatus);
+        if (playStatus !== "OK") {
+          throw new Error("playability: " + playStatus);
+        }
+
+        const d = data.videoDetails || {};
+        const tracks = data.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+
+        console.log("[YOC] ✅ ANDROID SUCCESS", {
+          attempt,
+          title: d.title,
+          tracks: tracks.length,
+          urls_have_exp: tracks.map(t => t.baseUrl?.includes("exp=xpe")).join(",")
+        });
+
+        return {
+          videoDetails: {
+            title: d.title || "",
+            author: d.author || "",
+            channelId: d.channelId || "",
+            lengthSeconds: d.lengthSeconds || "0",
+            shortDescription: d.shortDescription || "",
+            videoId: d.videoId || videoId,
+            isLiveContent: d.isLiveContent || false,
+            thumbnailUrl: d.thumbnail?.thumbnails?.slice(-1)[0]?.url || ""
+          },
+          captionTracks: tracks.map((t) => ({
+            vssId: t.vssId || "",
+            baseUrl: t.baseUrl || "",
+            name: t.name?.simpleText || t.name?.runs?.map(r => r.text).join("") || t.name || "",
+            languageCode: t.languageCode || "",
+            kind: t.kind || ""
+          }))
+        };
+      } catch (error) {
+        console.warn("[YOC] ANDROID player FAILED", { attempt, message: error?.message });
+      }
+    }
+  } else {
+    console.warn("[YOC] skip ANDROID: missing", { videoId, apiKeyLen: apiKey?.length || 0 });
+  }
+
+  // Fallback: 从 DOM script 标签提取（⚠️ 带 exp=xpe，fetch 字幕大概率会失败）
+  console.warn("[YOC] ⚠️ falling back to DOM extraction — baseUrl WILL have exp=xpe, subtitle fetch will likely fail!");
+  const fromScript = extractPlayerResponseFromScripts();
+  if (fromScript && fromScript.videoDetails) {
+    const hasExp = fromScript.captionTracks?.some(t => t.baseUrl?.includes("exp=xpe"));
+    console.warn("[YOC] DOM fallback result:", {
+      title: fromScript.videoDetails.title,
+      tracks: fromScript.captionTracks?.length || 0,
+      anyTrackHasExpXpe: hasExp
+    });
+    return fromScript;
+  }
+
+  console.error("[YOC] ❌ ALL sources failed — cannot get player response");
+  return null;
+}
+
+function cleanVideoUrl(href = location.href) {
+  const videoId = extractVideoId(href);
+  if (!videoId) {
     return href;
   }
+  return `https://www.youtube.com/watch?v=${videoId}`;
 }
 
-function extractPageIndex(url) {
-  try {
-    const page = Number(new URL(url).searchParams.get("p") || "1");
-    if (!Number.isFinite(page) || page <= 0) {
-      return 1;
-    }
-    return page;
-  } catch {
-    return 1;
-  }
+function extractPageIndex(_url) {
+  return 1;
 }
 
-function hasExplicitPageParam(url) {
-  try {
-    return new URL(url).searchParams.has("p");
-  } catch {
-    return false;
-  }
+function hasExplicitPageParam(_url) {
+  return false;
 }
 
-function extractOid(url) {
-  try {
-    return String(new URL(url).searchParams.get("oid") || "").trim();
-  } catch {
-    return "";
-  }
+function extractOid(_url) {
+  return "";
 }
 
 function ensureRunActive(runId) {
@@ -4505,7 +4583,7 @@ async function retryAsync(task, retries = 1, delayMs = 180) {
       }
       // 指数退避：delayMs * 2^(attempt-1)，最多等待 5 秒
       const backoffDelay = Math.min(delayMs * Math.pow(2, attempt - 1), 5000);
-      logInfo(`[BOC] retrying after ${backoffDelay}ms, attempt ${attempt + 1}/${retries}`, {
+      logInfo(`[YOC] retrying after ${backoffDelay}ms, attempt ${attempt + 1}/${retries}`, {
         error: getErrorMessage(error),
         code: error.code
       });
@@ -4541,33 +4619,23 @@ async function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function fetchVideoMeta(bvid) {
-  const url = `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`;
-  logInfo("[BOC] fetch video meta", { url, bvid });
-  const payload = await fetchJson(url);
-  if (payload.code !== 0) {
-    throw new Error(toReadableText(payload?.message, "无法获取视频信息"));
-  }
-
-  const data = payload.data || {};
-  const pubdate = Number(data.pubdate || 0);
-  const uploadDate = pubdate > 0 ? formatLocalDate(pubdate * 1000) : "";
-  const pages = Array.isArray(data.pages) ? data.pages : [];
+async function fetchVideoMeta(videoId) {
+  const playerResp = await getYtPlayerResponse();
+  const details = playerResp?.videoDetails || {};
+  const title = details.title || readVideoTitle();
+  const author = details.author || readVideoAuthor();
+  const description = details.shortDescription || readVideoDescription();
+  const duration = Number(details.lengthSeconds || 0) || 0;
+  const uploadDate = readUploadDate();
 
   return {
-    aid: data.aid ? String(data.aid) : "",
-    title: String(data.title || ""),
-    author: String(data.owner?.name || ""),
-    description: String(data.desc || ""),
+    videoId,
+    title,
+    author,
+    description,
     uploadDate,
-    defaultCid: data.cid ? String(data.cid) : "",
-    defaultDuration: Number(data.duration || 0) || 0,
-    pages: pages.map((item) => ({
-      cid: String(item.cid || ""),
-      page: Number(item.page || 0) || 0,
-      part: String(item.part || "").trim(),
-      duration: Number(item.duration || 0) || 0
-    }))
+    duration,
+    pages: [{ page: 1, part: title, cid: videoId, duration }]
   };
 }
 
@@ -4635,153 +4703,84 @@ function pickDurationFromPages(pages, pageIndex, fallbackDuration = 0) {
 }
 
 function readVideoTitle() {
-  const h1 = document.querySelector("h1.video-title");
-  if (h1?.textContent?.trim()) {
-    return h1.textContent.trim();
-  }
-
   const metaTitle = document.querySelector('meta[property="og:title"]');
-  if (metaTitle?.getAttribute("content")) {
-    return metaTitle.getAttribute("content").trim();
-  }
-
-  return document.title.replace(/_哔哩哔哩_bilibili/i, "").trim();
+  if (metaTitle?.content?.trim()) return metaTitle.content.trim();
+  const h1Title = document.querySelector("h1.ytd-watch-metadata, h1#title");
+  if (h1Title?.textContent?.trim()) return h1Title.textContent.trim();
+  return document.title.replace(/ - YouTube$/, "").trim();
 }
 
 function readVideoAuthor() {
-  const owner = document.querySelector(".up-name");
-  if (owner?.textContent?.trim()) {
-    return owner.textContent.trim();
-  }
-
-  const author = document.querySelector('meta[name="author"]');
-  return author?.getAttribute("content")?.trim() || "";
+  const authorEl = document.querySelector("meta[itemprop='author']");
+  if (authorEl?.content?.trim()) return authorEl.content.trim();
+  const channelName = document.querySelector("#channel-name, .ytd-channel-name a");
+  if (channelName?.textContent?.trim()) return channelName.textContent.trim();
+  return "";
 }
 
 function readVideoDescription() {
-  const descNode = document.querySelector(
-    ".desc-info-text, .video-desc .desc-info-text, .video-info-detail .text, .basic-desc-info"
-  );
-  return descNode?.textContent?.trim() || "";
+  const metaDesc = document.querySelector('meta[property="og:description"]');
+  if (metaDesc?.content?.trim()) return metaDesc.content.trim();
+  const descEl = document.querySelector("#description-inline-expander, ytd-watch-metadata #description");
+  return descEl?.textContent?.trim() || "";
 }
 
 function readUploadDate() {
-  const publishNode = document.querySelector('meta[itemprop="uploadDate"]');
-  if (publishNode?.getAttribute("content")) {
-    return publishNode.getAttribute("content").trim();
+  const dateMeta = document.querySelector("meta[itemprop='uploadDate']");
+  if (dateMeta?.content?.trim()) {
+    const d = new Date(dateMeta.content);
+    if (!isNaN(d.getTime())) return formatLocalDate(d.getTime());
   }
-
-  const dateText = document.querySelector(".pubdate-ip-text")?.textContent?.trim();
-  if (dateText) {
-    return dateText;
-  }
-
+  const dateEl = document.querySelector("ytd-video-primary-info-renderer #date-text, ytd-watch-metadata yt-formatted-string");
+  if (dateEl?.textContent?.trim()) return dateEl.textContent.trim();
   return formatLocalDate();
 }
 
-async function fetchSubtitleBundle(bvid, cid, aid = "") {
-  const requests = buildSubtitleInfoRequests({ bvid, cid, aid });
-  const fetchByRequest = async (request) => {
-    logInfo("[BOC] fetch subtitles list", {
-      source: request.source,
-      url: request.url,
-      bvid,
-      cid,
-      aid
-    });
+async function fetchSubtitleBundle(videoId) {
+  // getYtPlayerResponse 现在返回 background 精简结构：
+  // { videoDetails: {...}, captionTracks: [...] }
+  const playerResp = await getYtPlayerResponse();
+  const captionTracks = playerResp?.captionTracks || [];
 
-    const payload = await fetchJson(request.url);
-    logInfo("[BOC] subtitles API raw response", { source: request.source, payload });
-    if (payload.code !== 0) {
-      throw buildBiliApiError(payload, "无法获取字幕列表");
-    }
-
-    const chapters = mapChaptersFromPlayerData(payload.data);
-    const subtitles = mapSubtitleTracks(payload.data?.subtitle?.subtitles || [], request.source);
-    const withUrl = subtitles.filter((item) => item.subtitleUrl);
-    return { source: request.source, chapters, withUrl };
-  };
-
-  if (requests.length === 0) {
-    return { tracks: [], chapters: [] };
-  }
-
-  const primaryRequest = requests[0];
-  try {
-    const primaryResult = await fetchByRequest(primaryRequest);
-    if (primaryResult.withUrl.length > 0) {
-      return { tracks: primaryResult.withUrl, chapters: primaryResult.chapters };
-    }
-    // 主来源成功但无字幕：直接判定无字幕，不再跨源兜底。
-    return { tracks: [], chapters: primaryResult.chapters };
-  } catch (primaryError) {
-    logWarn("[BOC] subtitles API request failed", {
-      source: primaryRequest.source,
-      message: getErrorMessage(primaryError)
-    });
-
-    // 仅当主来源请求失败时才尝试次来源。
-    if (requests.length > 1) {
-      const secondaryRequest = requests[1];
-      try {
-        const secondaryResult = await fetchByRequest(secondaryRequest);
-        if (secondaryResult.withUrl.length > 0) {
-          logWarn("[BOC] primary subtitles source failed, using fallback source", {
-            primary: primaryRequest.source,
-            fallback: secondaryRequest.source
-          });
-          return { tracks: secondaryResult.withUrl, chapters: secondaryResult.chapters };
-        }
-        return { tracks: [], chapters: secondaryResult.chapters };
-      } catch (secondaryError) {
-        logWarn("[BOC] fallback subtitles source failed", {
-          source: secondaryRequest.source,
-          message: getErrorMessage(secondaryError)
-        });
-        throw secondaryError;
-      }
-    }
-
-    throw primaryError;
-  }
-}
-
-function buildSubtitleInfoRequests({ bvid, cid, aid }) {
-  const safeBvid = encodeURIComponent(String(bvid || ""));
-  const safeCid = encodeURIComponent(String(cid || ""));
-  const safeAid = encodeURIComponent(String(aid || ""));
-  const requests = [];
-
-  // 参考 SubBatch：优先用 aid+cid 的 wbi 接口作为主来源。
-  if (aid) {
-    requests.push({
-      source: "player-wbi-v2",
-      url:
-        "https://api.bilibili.com/x/player/wbi/v2" +
-        `?aid=${safeAid}` +
-        `&cid=${safeCid}` +
-        (bvid ? `&bvid=${safeBvid}` : "")
-    });
-  }
-
-  // 仅在主来源不可用时再回退到 player-v2。
-  requests.push({
-    source: "player-v2",
-    url:
-      "https://api.bilibili.com/x/player/v2" +
-      (bvid ? `?bvid=${safeBvid}` : "?") +
-      `${bvid ? "&" : ""}cid=${safeCid}` +
-      (aid ? `&aid=${safeAid}` : "")
+  logInfo("[YOC] fetchSubtitleBundle: raw captionTracks", {
+    count: captionTracks.length,
+    tracks: captionTracks.map((t) => ({
+      languageCode: t.languageCode,
+      name: t.name,
+      kind: t.kind,
+      hasBaseUrl: !!t.baseUrl
+    }))
   });
 
-  return requests;
+  const tracks = captionTracks
+    .map((track) => ({
+      id: track.vssId || String(Math.random()),
+      lan: track.languageCode || "",
+      lanDoc: track.name || track.languageCode || "",
+      subtitleUrl: track.baseUrl || "",
+      isAsr: track.kind === "asr",
+      source: "youtube"
+    }))
+    .filter((item) => item.subtitleUrl);
+
+  logInfo("[YOC] fetchSubtitleBundle: built tracks", { count: tracks.length });
+
+  // YouTube 没有方便的官方章节接口，留空
+  const chapters = [];
+
+  return { tracks, chapters };
+}
+
+function buildSubtitleInfoRequests() {
+  // YouTube 不再需要构建多源请求列表
+  return [];
 }
 
 function buildBiliApiError(payload, fallbackMessage) {
   const msg = toReadableText(payload?.message, fallbackMessage);
   const error = new Error(msg);
   error.code = payload?.code;
-  error.retryable = isRetryableError(payload?.code);
+  error.retryable = false;
   return error;
 }
 
@@ -4795,16 +4794,9 @@ function mapSubtitleTracks(subtitles, source = "unknown") {
   }));
 }
 
-function mapChaptersFromPlayerData(data) {
-  const raw = Array.isArray(data?.view_points) ? data.view_points : [];
-  return normalizeChapters(
-    raw.map((item) => ({
-      title: String(item?.content || item?.title || item?.label || "").trim(),
-      from: normalizeChapterTime(item?.from ?? item?.start ?? item?.start_time),
-      to: normalizeChapterTime(item?.to ?? item?.end ?? item?.end_time),
-      source: "player-view-points"
-    }))
-  );
+function mapChaptersFromPlayerData() {
+  // YouTube 章节数据获取较复杂，暂不实现
+  return [];
 }
 
 function normalizeChapterTime(value) {
@@ -4953,7 +4945,7 @@ async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
   let lastError = null;
   for (const item of candidates || []) {
     try {
-      logInfo("[BOC] try subtitle track", {
+      logInfo("[YOC] try subtitle track", {
         id: item.id,
         lan: item.lan,
         lanDoc: item.lanDoc,
@@ -4978,9 +4970,9 @@ async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
         reason: reasonCode || reasonMessage
       };
       if (reasonCode === "SUBTITLE_DURATION_MISMATCH") {
-        logInfo(`[BOC] subtitle track skipped ${JSON.stringify(meta)}`);
+        logInfo(`[YOC] subtitle track skipped ${JSON.stringify(meta)}`);
       } else {
-        logWarn(`[BOC] subtitle track rejected ${JSON.stringify(meta)}`);
+        logWarn(`[YOC] subtitle track rejected ${JSON.stringify(meta)}`);
       }
       ensureRunActive(runId);
       continue;
@@ -4994,9 +4986,7 @@ async function tryLoadSubtitleCandidates(candidates, runId, forceRefresh) {
 }
 
 function isAiSubtitle(item) {
-  const lan = String(item?.lan || "").toLowerCase();
-  // B站 AI 自动字幕的 lan 以 "ai-" 开头
-  return lan.startsWith("ai-");
+  return item?.isAsr === true;
 }
 
 function subtitlePriority(item) {
@@ -5082,26 +5072,108 @@ function readRuntimeVideoDuration() {
   return 0;
 }
 
-async function fetchSubtitleBody(url) {
-  logInfo("[BOC] fetch subtitle body", { url });
-  return fetchJsonInBackground(url);
+// 解析 srv3 XML 格式的字幕（正则方式，避免 TrustedHTML 限制）
+function parseSrv3Xml(text) {
+  const items = [];
+  // 匹配所有 <p ...>...</p> 块
+  const pRegex = /<p\s+t="([^"]*)"\s+d="([^"]*)"[^>]*>([\s\S]*?)<\/p>/g;
+  let match;
+  while ((match = pRegex.exec(text)) !== null) {
+    const pStart = parseFloat(match[1]) / 1000; // 秒
+    const pDur = parseFloat(match[2]) / 1000;
+    const pEnd = pStart + pDur;
+    const inner = match[3];
+
+    // 从 <p> 内部提取文本（可能有 <s> 子元素或直接文本）
+    // <s> 标签内的文本 + 直接文本节点
+    let content = "";
+    const sRegex = /<s(?:\s+t="([^"]*)")?[^>]*>([\s\S]*?)<\/s>/g;
+    let sMatch;
+    let lastIdx = 0;
+    while ((sMatch = sRegex.exec(inner)) !== null) {
+      // 捕获 <s> 标签之间的纯文本（如果有的话）
+      const plainText = inner.slice(lastIdx, sMatch.index);
+      if (plainText.trim()) content += plainText.trim();
+      content += sMatch[2].trim();
+      lastIdx = sRegex.lastIndex;
+    }
+    // 最后一个 <s> 后的纯文本
+    const tailPlain = inner.slice(lastIdx);
+    if (tailPlain.trim()) content += tailPlain.trim();
+
+    // 清理 XML 实体
+    content = content.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+
+    if (content) {
+      items.push({ from: pStart, to: pEnd, content });
+    }
+  }
+  return items;
+}
+
+// 解析 JSON3 格式的字幕
+function parseJson3(data) {
+  return (data.events || [])
+    .filter((ev) => ev.tStartMs !== undefined && ev.segs && ev.segs.length > 0)
+    .map((ev) => ({
+      from: ev.tStartMs / 1000,
+      to: ev.tStartMs / 1000 + (ev.dDurationMs || 0) / 1000,
+      content: ev.segs.map((seg) => seg.utf8 || "").join("").trim()
+    }))
+    .filter((item) => item.content);
+}
+
+async function fetchSubtitleBody(subtitleUrl) {
+  console.log("[YOC] fetchSubtitleBody START", {
+    urlPreview: subtitleUrl?.slice(0, 120),
+    hasExpXpe: subtitleUrl?.includes("exp=xpe")
+  });
+
+  // 直接 fetch（ANDROID player API 返回的 URL 不带 exp=xpe，content script fetch 100% 能成功）
+  const response = await fetch(subtitleUrl, { credentials: "include", cache: "no-store" });
+  console.log("[YOC] subtitle fetch HTTP", response.status);
+  if (!response.ok) throw new Error("字幕 HTTP " + response.status);
+
+  const text = await response.text();
+  console.log("[YOC] subtitle body size:", text?.length, "bytes");
+  if (!text || !text.trim()) {
+    console.error("[YOC] ❌ 字幕响应为空！URL has exp=xpe:", subtitleUrl?.includes("exp=xpe"));
+    throw new Error("字幕响应为空");
+  }
+
+  let body;
+  if (text.trim().startsWith("{")) {
+    console.log("[YOC] subtitle format: JSON3");
+    body = parseJson3(JSON.parse(text));
+  } else {
+    console.log("[YOC] subtitle format: srv3 XML");
+    body = parseSrv3Xml(text);
+  }
+
+  console.log("[YOC] ✅ subtitle parsed:", body.length, "segments");
+  return { body };
 }
 
 async function fetchJson(url) {
-  if (typeof url === "string" && url.startsWith("https://api.bilibili.com/")) {
-    return fetchJsonInBackground(url);
-  }
-
   const response = await fetch(url, {
     credentials: "include",
     cache: "no-store"
   });
 
   if (!response.ok) {
-    throw new Error(`请求失败：${response.status}`);
+    throw new Error(`HTTP ${response.status}`);
   }
 
-  return response.json();
+  const text = await response.text();
+  if (!text || !text.trim()) {
+    throw new Error("响应为空");
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    logWarn("[YOC] JSON parse failed", { url, textPreview: text.slice(0, 200) });
+    throw new Error("响应不是有效的 JSON 格式");
+  }
 }
 
 async function fetchJsonInBackground(url) {
@@ -5134,42 +5206,13 @@ function normalizeHotComments(comments, limit = 20) {
     .slice(0, limit);
 }
 
-function getCurrentAid() {
-  let aid = Number(state.aid) || 0;
-  if (!aid && typeof window !== "undefined") {
-    try {
-      aid = Number(window?.__INITIAL_STATE__?.aid) || 0;
-    } catch {}
-  }
-  return aid;
+function getCurrentVideoId() {
+  return String(state.videoId || "").trim();
 }
 
-async function fetchHotComments(count = 20) {
-  const safeCount = Math.max(0, Number(count) || 0);
-  if (!safeCount) {
-    return [];
-  }
-
-  const aid = getCurrentAid();
-  if (!aid) {
-    return [];
-  }
-
-  const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${aid}&mode=3&ps=${safeCount}&pn=1`;
-  const resp = await sendRuntimeMessage({ type: "fetch-json", url });
-  if (!resp?.ok) {
-    throw new Error(resp?.error || "评论接口失败");
-  }
-
-  const replies = Array.isArray(resp?.data?.data?.replies) ? resp.data.data.replies : [];
-  return normalizeHotComments(
-    replies.map((item) => ({
-      uname: item?.member?.uname || "匿名",
-      like: item?.like || 0,
-      message: item?.content?.message || ""
-    })),
-    safeCount
-  );
+async function fetchHotComments(_count = 20) {
+  // YouTube 热评获取需要复杂的 innertube API，暂不支持
+  return [];
 }
 
 function rebuildDerivedContent() {
@@ -5189,7 +5232,7 @@ async function refreshDerivedContent({ refreshComments = false } = {}) {
         state.hotComments = await fetchHotComments(20);
       } catch (error) {
         state.hotComments = [];
-        logWarn("[BOC] failed to fetch hot comments for note export", error);
+        logWarn("[YOC] failed to fetch hot comments for note export", error);
       }
     }
   }
@@ -5198,19 +5241,8 @@ async function refreshDerivedContent({ refreshComments = false } = {}) {
 }
 
 function normalizeSubtitleUrl(url) {
-  if (!url) {
-    return "";
-  }
-
-  if (url.startsWith("//")) {
-    return `https:${url}`;
-  }
-
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return url;
-  }
-
-  return `https://${url.replace(/^\/+/, "")}`;
+  // YouTube 的 baseUrl 已经是完整 HTTPS URL
+  return String(url || "").trim();
 }
 
 function buildSubtitlePreview(body, settings) {
@@ -5250,8 +5282,7 @@ function buildMarkdown(meta, body, settings) {
   );
   const frontMatter = buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml);
 
-  const page = extractPageIndex(location.href);
-  const embedIframe = buildBilibiliEmbedIframe(meta, page);
+  const embedIframe = buildYoutubeEmbedIframe(meta);
   const intro = String(meta.description || "").trim();
   const noteSectionContext = buildNotePlaceholderTemplateContext(meta, intro);
   const noteSections = groupNotePlaceholderSections(settings, noteSectionContext);
@@ -5312,8 +5343,7 @@ function buildFrontMatter(meta, settings, created, tagsCsv, tagsYaml) {
   const fieldLines = {
     title: `title: "${escapeYaml(meta.title)}"`,
     url: `url: "${escapeYaml(cleanVideoUrl())}"`,
-    bvid: `bvid: "${escapeYaml(meta.bvid)}"`,
-    cid: `cid: "${escapeYaml(meta.cid)}"`,
+    videoId: `videoId: "${escapeYaml(meta.videoId)}"`,
     author: `author: "${escapeYaml(meta.author || "unknown")}"`,
     upload_date: `upload_date: "${escapeYaml(meta.uploadDate || "unknown")}"`,
     subtitle_lang: `subtitle_lang: "${escapeYaml(meta.selectedSubtitleLang || "unknown")}"`,
@@ -5395,8 +5425,7 @@ function buildFrontmatterTemplateContext(meta, created, tagsCsv, tagsYaml) {
   return {
     title: String(meta?.title || "").trim(),
     url: String(cleanVideoUrl() || "").trim(),
-    bvid: String(meta?.bvid || "").trim(),
-    cid: String(meta?.cid || "").trim(),
+    videoId: String(meta?.videoId || "").trim(),
     author: String(meta?.author || "unknown").trim(),
     upload_date: String(meta?.uploadDate || "unknown").trim(),
     subtitle_lang: String(meta?.selectedSubtitleLang || "unknown").trim(),
@@ -5419,7 +5448,7 @@ function buildFolderTemplateContext(meta, created = formatLocalDate()) {
     created: sanitizeFolderTemplateValue(created),
     upload_date: sanitizeFolderTemplateValue(meta?.uploadDate || ""),
     author: sanitizeFolderTemplateValue(meta?.author || ""),
-    bvid: sanitizeFolderTemplateValue(meta?.bvid || "")
+    videoId: sanitizeFolderTemplateValue(meta?.videoId || "")
   };
 }
 
@@ -5429,7 +5458,7 @@ function resolveFolderTemplate(template, meta) {
     return "";
   }
 
-  const allowedKeys = new Set(["created", "upload_date", "author", "bvid"]);
+  const allowedKeys = new Set(["created", "upload_date", "author", "videoid"]);
   const context = buildFolderTemplateContext(meta);
   const resolved = String(normalized).replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, rawKey) => {
     const key = String(rawKey || "").trim().toLowerCase();
@@ -5671,13 +5700,10 @@ function buildChapterLines(chapters, withHours = false) {
   });
 }
 
-function buildBilibiliEmbedIframe(meta, page = 1) {
-  const safeAid = encodeURIComponent(String(meta?.aid || "").trim());
-  const safeBvid = encodeURIComponent(String(meta?.bvid || "").trim());
-  const safeCid = encodeURIComponent(String(meta?.cid || "").trim());
-  const safePage = Number(page) > 0 ? Number(page) : 1;
-
-  return `<iframe src="https://player.bilibili.com/player.html?aid=${safeAid}&bvid=${safeBvid}&cid=${safeCid}&page=${safePage}&autoplay=0" scrolling="no" border="0" frameborder="no" framespacing="0" allow="fullscreen; picture-in-picture" allowfullscreen="true" style="height:100%;width:100%; aspect-ratio: 16 / 9;"> </iframe>`;
+function buildYoutubeEmbedIframe(meta) {
+  const videoId = String(meta?.videoId || "").trim();
+  if (!videoId) return "";
+  return `<iframe src="https://www.youtube.com/embed/${videoId}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="height:100%;width:100%; aspect-ratio: 16 / 9;"></iframe>`;
 }
 
 function buildSrt(body) {
@@ -5780,18 +5806,10 @@ function buildNoteFilename(meta) {
     baseParts.push(formatLocalDate());
   }
 
-  baseParts.push(meta.title || meta.bvid || "bilibili-subtitle");
-
-  if (Number(meta.pageCount) > 1) {
-    baseParts.push(`P${Number(meta.pageIndex) > 0 ? Number(meta.pageIndex) : 1}`);
-    const pageTitle = String(meta.pageTitle || "").trim();
-    if (pageTitle) {
-      baseParts.push(pageTitle);
-    }
-  }
+  baseParts.push(meta.title || meta.videoId || "youtube-subtitle");
 
   const baseName = sanitizeFileName(baseParts.filter(Boolean).join("-"));
-  return `${baseName || "bilibili-subtitle"}.md`;
+  return `${baseName || "youtube-subtitle"}.md`;
 }
 
 function normalizeFolder(input) {

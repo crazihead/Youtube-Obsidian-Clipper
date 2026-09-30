@@ -28,10 +28,10 @@ const DEFAULT_AI_SYSTEM_PROMPT = [
 ].join("\n");
 
 const DEFAULT_SETTINGS = {
-  noteFolder: "Clippings/Bilibili",
+  noteFolder: "Clippings/YouTube",
   obsidianApiBaseUrl: "http://127.0.0.1:27123",
   obsidianApiKey: "",
-  tags: "clippings,bilibili",
+  tags: "clippings,youtube",
   downloadFormat: "srt",
   includeDateInFilename: true,
   includeHotCommentsInNote: false,
@@ -42,8 +42,7 @@ const DEFAULT_SETTINGS = {
   frontmatterFields: [
     "title",
     "url",
-    "bvid",
-    "cid",
+    "videoId",
     "author",
     "upload_date",
     "subtitle_lang",
@@ -266,7 +265,7 @@ function collectInitialQuickPrompts() {
 
 function validateSettings(payload, { requireApiKey }) {
   if (!payload.noteFolder) {
-    return { ok: false, field: elements.noteFolder, message: "请填写笔记目录（例如：Clippings/Bilibili）" };
+    return { ok: false, field: elements.noteFolder, message: "请填写笔记目录（例如：Clippings/YouTube）" };
   }
   if (/^[\/\\]|[\/\\]$/.test(payload.noteFolder)) {
     return { ok: false, field: elements.noteFolder, message: "笔记目录无需以 / 开头或结尾" };

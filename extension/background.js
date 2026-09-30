@@ -10,7 +10,7 @@ const DEFAULT_INITIAL_QUICK_PROMPTS = [
   "根据评论总结观众的看法"
 ];
 const DEFAULT_PLAYER_AI_QUICK_PROMPT = "整理这期视频的内容，输出结构化总结：主题、核心观点、关键细节、结论与可执行启发。";
-const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "boc_player_ai_quick_action_v1";
+const PLAYER_AI_QUICK_ACTION_STORAGE_KEY = "yoc_player_ai_quick_action_v1";
 const STREAM_FIRST_TOKEN_TIMEOUT_MS = 90000;
 const LEGACY_DEFAULT_AI_SYSTEM_PROMPT = [
   "你是一名专业的视频内容分析助手。基于字幕与评论提炼高价值信息，不要复述内容，不要输出思考过程或 think 标签。",
@@ -30,9 +30,9 @@ const DEFAULT_AI_SYSTEM_PROMPT = [
 ].join("\n");
 
 const DEFAULT_SYNC_SETTINGS = {
-  noteFolder: "Clippings/Bilibili",
+  noteFolder: "Clippings/YouTube",
   obsidianApiBaseUrl: "http://127.0.0.1:27123",
-  tags: "clippings,bilibili",
+  tags: "clippings,youtube",
   downloadFormat: "srt",
   includeDateInFilename: true,
   includeHotCommentsInNote: false,
@@ -50,8 +50,7 @@ const DEFAULT_SYNC_SETTINGS = {
   frontmatterFields: [
     "title",
     "url",
-    "bvid",
-    "cid",
+    "videoId",
     "author",
     "upload_date",
     "subtitle_lang",
@@ -115,7 +114,7 @@ async function probeContentScriptVersion(tabId) {
   try {
     const probe = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
+      func: () => globalThis.__YOC_CONTENT_SCRIPT_LOADED__ || ""
     });
     return String(probe?.[0]?.result || "");
   } catch {
@@ -198,14 +197,12 @@ async function triggerReaderModeInTab(tabId, readerUrl = "", retries = 12, delay
 function isSupportedAiTabUrl(url) {
   try {
     const parsed = new URL(String(url || ""));
-    if (parsed.hostname !== "www.bilibili.com") {
-      return false;
+    if (!parsed.hostname.includes("youtube.com")) {
+      if (parsed.hostname !== "youtu.be") return false;
+      const match = parsed.pathname.match(/^\/([a-zA-Z0-9_-]{11})/);
+      return Boolean(match);
     }
-    return (
-      parsed.pathname === "/list/watchlater" ||
-      parsed.pathname === "/list/watchlater/" ||
-      parsed.pathname.startsWith("/video/")
-    );
+    return parsed.pathname.startsWith("/watch") || parsed.pathname.startsWith("/shorts/");
   } catch {
     return false;
   }
@@ -239,8 +236,7 @@ async function getAiSidepanelState(tabId, { forceRefresh = false } = {}) {
   let contextResp = await sendMessageToTab(tab.id, { type: "sidepanel-get-context" });
   const hasPayload = Boolean(contextResp?.ok && contextResp?.payload);
   const hasLoadedClip = Boolean(
-    contextResp?.payload?.bvid ||
-    contextResp?.payload?.aid ||
+    contextResp?.payload?.videoId ||
     contextResp?.payload?.title
   );
   const needsRefresh =
@@ -308,12 +304,7 @@ function normalizeAiContextRef(ref) {
     url: String(value.url || "").trim(),
     author: String(value.author || "").trim(),
     uploadDate: String(value.uploadDate || "").trim(),
-    bvid: String(value.bvid || extractBvidFromUrl(value.url) || "").trim(),
-    cid: String(value.cid || "").trim(),
-    aid: String(value.aid || "").trim(),
-    pageIndex: Number(value.pageIndex) > 0 ? Number(value.pageIndex) : 1,
-    pageCount: Number(value.pageCount) > 0 ? Number(value.pageCount) : 0,
-    pageTitle: String(value.pageTitle || "").trim(),
+    videoId: String(value.videoId || extractVideoIdFromUrl(value.url) || "").trim(),
     subtitleLang: String(value.subtitleLang || "").trim(),
     selectedSubtitleId: String(value.selectedSubtitleId || "").trim(),
     selectedSubtitleUrl: String(value.selectedSubtitleUrl || "").trim(),
@@ -321,10 +312,17 @@ function normalizeAiContextRef(ref) {
   };
 }
 
-function extractBvidFromUrl(url) {
+function extractVideoIdFromUrl(url) {
   const text = String(url || "").trim();
-  const match = text.match(/\/video\/(BV[0-9A-Za-z]+)/i) || text.match(/[?&]bvid=(BV[0-9A-Za-z]+)/i);
-  return match?.[1] || "";
+  let match = text.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+  if (match?.[1]) return match[1];
+  match = text.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
+  if (match?.[1]) return match[1];
+  match = text.match(/\/shorts\/([a-zA-Z0-9_-]{11})/);
+  if (match?.[1]) return match[1];
+  match = text.match(/\/embed\/([a-zA-Z0-9_-]{11})/);
+  if (match?.[1]) return match[1];
+  return "";
 }
 
 function formatLocalDate(value = Date.now()) {
@@ -332,140 +330,49 @@ function formatLocalDate(value = Date.now()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function extractPageIndexFromUrl(url) {
-  try {
-    const page = Number(new URL(String(url || "")).searchParams.get("p") || "1");
-    return Number.isFinite(page) && page > 0 ? page : 1;
-  } catch {
-    return 1;
-  }
+function buildCanonicalVideoUrl(videoId) {
+  const safeId = String(videoId || "").trim();
+  if (!safeId) return "";
+  return `https://www.youtube.com/watch?v=${safeId}`;
 }
 
-function buildCanonicalVideoUrl(bvid, pageIndex = 1) {
-  const safeBvid = String(bvid || "").trim();
-  if (!safeBvid) {
-    return "";
-  }
-  if (Number(pageIndex) > 1) {
-    return `https://www.bilibili.com/video/${safeBvid}/?p=${Number(pageIndex)}`;
-  }
-  return `https://www.bilibili.com/video/${safeBvid}/`;
-}
-
-function createBiliHeaders(url) {
+function createHeaders(url) {
   const headers = new Headers();
-  const isBiliRequest = /(?:api\.bilibili\.com|hdslb\.com)/.test(String(url || ""));
-  if (isBiliRequest) {
-    headers.set("Accept", "application/json, text/plain, */*");
-    headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-    headers.set("Cache-Control", "no-cache");
-    headers.set("Pragma", "no-cache");
-  }
   return headers;
 }
 
-async function fetchJsonForAi(url) {
-  const headers = createBiliHeaders(url);
-  const options = {
+async function fetchJson(url) {
+  const response = await fetch(url, {
     method: "GET",
     credentials: "include",
     cache: "no-store"
-  };
-  if (headers.size > 0) {
-    options.headers = headers;
-  }
-  if (/(?:api\.bilibili\.com|hdslb\.com)/.test(String(url || ""))) {
-    options.referrer = "https://www.bilibili.com/";
-    options.referrerPolicy = "strict-origin-when-cross-origin";
-  }
-
-  const response = await fetch(url, options);
+  });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
   return response.json();
 }
 
-async function fetchBiliVideoMetaByBvid(bvid) {
-  const payload = await fetchJsonForAi(`https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`);
-  if (payload?.code !== 0) {
-    throw new Error(String(payload?.message || "无法获取视频信息"));
+async function fetchYoutubeVideoMeta(videoId) {
+  const url = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+  try {
+    const payload = await fetchJson(url);
+    return {
+      videoId,
+      title: String(payload.title || "").trim(),
+      author: String(payload.author_name || "").trim(),
+      uploadDate: "",
+      duration: 0
+    };
+  } catch {
+    return {
+      videoId,
+      title: "",
+      author: "",
+      uploadDate: "",
+      duration: 0
+    };
   }
-
-  const data = payload.data || {};
-  const pages = Array.isArray(data.pages) ? data.pages : [];
-  return {
-    aid: String(data.aid || "").trim(),
-    title: String(data.title || "").trim(),
-    author: String(data.owner?.name || "").trim(),
-    uploadDate: Number(data.pubdate) > 0 ? formatLocalDate(Number(data.pubdate) * 1000) : "",
-    defaultCid: String(data.cid || "").trim(),
-    defaultDuration: Number(data.duration || 0) || 0,
-    pages: pages.map((item) => ({
-      cid: String(item?.cid || "").trim(),
-      page: Number(item?.page || 0) || 0,
-      part: String(item?.part || "").trim(),
-      duration: Number(item?.duration || 0) || 0
-    }))
-  };
-}
-
-function pickPageForAiContext(pages, ref) {
-  const safePages = Array.isArray(pages) ? pages : [];
-  const targetCid = String(ref?.cid || "").trim();
-  if (targetCid) {
-    const byCid = safePages.find((item) => String(item?.cid || "") === targetCid);
-    if (byCid) {
-      return byCid;
-    }
-  }
-
-  const pageIndex = extractPageIndexFromUrl(ref?.url || "");
-  const byPage = safePages.find((item) => Number(item?.page) === pageIndex);
-  if (byPage) {
-    return byPage;
-  }
-
-  return safePages[0] || null;
-}
-
-function buildSubtitleInfoRequests({ bvid, cid, aid }) {
-  const safeBvid = encodeURIComponent(String(bvid || ""));
-  const safeCid = encodeURIComponent(String(cid || ""));
-  const safeAid = encodeURIComponent(String(aid || ""));
-  const requests = [];
-
-  if (aid) {
-    requests.push({
-      source: "player-wbi-v2",
-      url:
-        "https://api.bilibili.com/x/player/wbi/v2" +
-        `?aid=${safeAid}` +
-        `&cid=${safeCid}` +
-        (bvid ? `&bvid=${safeBvid}` : "")
-    });
-  }
-
-  requests.push({
-    source: "player-v2",
-    url:
-      "https://api.bilibili.com/x/player/v2" +
-      (bvid ? `?bvid=${safeBvid}` : "?") +
-      `${bvid ? "&" : ""}cid=${safeCid}` +
-      (aid ? `&aid=${safeAid}` : "")
-  });
-
-  return requests;
-}
-
-function mapSubtitleTracks(subtitles, source = "unknown") {
-  return (subtitles || []).map((item) => ({
-    id: item?.id === undefined || item?.id === null ? "" : String(item.id),
-    lan: item?.lan || "",
-    lanDoc: item?.lan_doc || "",
-    subtitleUrl: normalizeSubtitleUrl(item?.subtitle_url || ""),
-    source
-  }));
 }
 
 function normalizeSubtitleUrl(url) {
@@ -477,17 +384,6 @@ function normalizeSubtitleUrl(url) {
     return `https:${text}`;
   }
   return text;
-}
-
-function mapChaptersFromPlayerData(data) {
-  const raw = Array.isArray(data?.view_points) ? data.view_points : [];
-  return normalizeChapters(
-    raw.map((item) => ({
-      title: String(item?.content || item?.title || item?.label || "").trim(),
-      from: normalizeChapterTime(item?.from ?? item?.start ?? item?.start_time),
-      to: normalizeChapterTime(item?.to ?? item?.end ?? item?.end_time)
-    }))
-  );
 }
 
 function normalizeChapterTime(value) {
@@ -593,47 +489,6 @@ function pickPreferredSubtitleTrack(subtitles, { previousId = "", previousUrl = 
   return tracks[0];
 }
 
-async function fetchBiliSubtitleBundle({ bvid, cid, aid }) {
-  const requests = buildSubtitleInfoRequests({ bvid, cid, aid });
-  for (const request of requests) {
-    let payload = null;
-    try {
-      payload = await fetchJsonForAi(request.url);
-    } catch {
-      continue;
-    }
-    if (payload?.code !== 0) {
-      continue;
-    }
-    const tracks = mapSubtitleTracks(payload.data?.subtitle?.subtitles || [], request.source).filter((item) => item.subtitleUrl);
-    return {
-      tracks,
-      chapters: mapChaptersFromPlayerData(payload.data)
-    };
-  }
-  throw new Error("无法获取字幕列表");
-}
-
-async function fetchBiliSubtitleBody(url) {
-  const payload = await fetchJsonForAi(url);
-  return Array.isArray(payload?.body) ? payload.body : [];
-}
-
-async function fetchBiliHotComments(aid, count = 18) {
-  const safeAid = Number(aid || 0) || 0;
-  if (!safeAid) {
-    return [];
-  }
-  const url = `https://api.bilibili.com/x/v2/reply/main?type=1&oid=${safeAid}&mode=3&ps=${count}&pn=1`;
-  const payload = await fetchJsonForAi(url).catch(() => null);
-  const replies = Array.isArray(payload?.data?.replies) ? payload.data.replies : [];
-  return replies.slice(0, count).map((item) => ({
-    uname: item?.member?.uname || "匿名",
-    like: item?.like || 0,
-    message: String(item?.content?.message || "").slice(0, 500)
-  }));
-}
-
 function shouldShowHoursInAiNote(meta, body) {
   const subtitleMaxTo = (body || []).reduce((max, item) => Math.max(max, Number(item?.to || 0) || 0), 0);
   const chapterMaxTo = (meta?.chapters || []).reduce((max, item) => Math.max(max, Number(item?.from || 0) || 0, Number(item?.to || 0) || 0), 0);
@@ -735,7 +590,7 @@ function buildAiConversationMarkdown(meta, body, settings) {
 
 async function resolveAiSidepanelContext(contextRef) {
   const ref = normalizeAiContextRef(contextRef);
-  if (!ref.isVideoContext || !ref.bvid) {
+  if (!ref.isVideoContext || !ref.videoId) {
     return {
       title: ref.title,
       url: ref.url,
@@ -748,88 +603,36 @@ async function resolveAiSidepanelContext(contextRef) {
     };
   }
 
-  const settings = await getMergedSettings();
-  const videoMeta = await fetchBiliVideoMetaByBvid(ref.bvid);
-  const page = pickPageForAiContext(videoMeta.pages, ref);
-  const cid = String(page?.cid || ref.cid || videoMeta.defaultCid || "").trim();
-  if (!cid) {
-    throw new Error("无法定位原视频分P");
-  }
-  const aid = String(videoMeta.aid || ref.aid || "").trim();
-  const subtitleBundle = await fetchBiliSubtitleBundle({ bvid: ref.bvid, cid, aid });
-  const tracks = normalizeSubtitleTracks(subtitleBundle.tracks || []);
-  if (!tracks.length) {
-    throw new Error("原视频暂时没有可用字幕");
-  }
-  const selectedTrack = pickPreferredSubtitleTrack(tracks, {
-    previousId: ref.selectedSubtitleId,
-    previousUrl: ref.selectedSubtitleUrl,
-    previousLang: ref.subtitleLang
-  }) || tracks[0];
-  const body = await fetchBiliSubtitleBody(selectedTrack.subtitleUrl);
-  if (!body.length) {
-    throw new Error("原视频字幕为空");
-  }
-
-  const pageIndex = Number(page?.page || extractPageIndexFromUrl(ref.url) || 1) || 1;
-  const hotComments = await fetchBiliHotComments(aid);
-  const title = String(videoMeta.title || ref.title || "").trim();
-  const author = String(videoMeta.author || ref.author || "").trim();
-  const uploadDate = String(videoMeta.uploadDate || ref.uploadDate || "").trim();
-  const pageTitle = String(page?.part || ref.pageTitle || "").trim();
-  const url = buildCanonicalVideoUrl(ref.bvid, pageIndex) || ref.url;
-  const contextMeta = {
-    title,
-    chapters: subtitleBundle.chapters || [],
-    videoDuration: Number(page?.duration || videoMeta.defaultDuration || 0) || 0
-  };
+  let meta = { title: ref.title, author: ref.author, uploadDate: ref.uploadDate };
+  try {
+    const ytMeta = await fetchYoutubeVideoMeta(ref.videoId);
+    if (ytMeta.title && !meta.title) meta.title = ytMeta.title;
+    if (ytMeta.author && !meta.author) meta.author = ytMeta.author;
+  } catch {}
 
   return {
-    title,
-    url,
-    author,
-    uploadDate,
-    bvid: ref.bvid,
-    cid,
-    aid,
-    pageIndex,
-    pageTitle,
-    subtitleLang: String(selectedTrack.lanDoc || selectedTrack.lan || "").trim(),
-    selectedSubtitleId: String(selectedTrack.id || "").trim(),
-    selectedSubtitleUrl: String(selectedTrack.subtitleUrl || "").trim(),
-    subtitleBody: body,
-    subtitleMarkdown: buildAiConversationMarkdown(contextMeta, body, settings),
-    subtitleOptions: tracks.map((item) => ({
-      id: String(item.id || "").trim(),
-      url: String(item.subtitleUrl || "").trim(),
-      lang: String(item.lanDoc || item.lan || "").trim()
-    })),
-    hotComments,
+    ...meta,
+    videoId: ref.videoId,
+    url: buildCanonicalVideoUrl(ref.videoId) || ref.url,
+    subtitleLang: ref.subtitleLang,
+    selectedSubtitleId: ref.selectedSubtitleId,
+    selectedSubtitleUrl: ref.selectedSubtitleUrl,
+    subtitleBody: [],
+    subtitleMarkdown: "",
+    subtitleOptions: [],
+    hotComments: [],
     isVideoContext: true
   };
 }
 
 async function resolveAiSidepanelPageRef(contextRef) {
   const ref = normalizeAiContextRef(contextRef);
-  if (!ref.isVideoContext || !ref.bvid) {
-    return {
-      url: ref.url,
-      bvid: ref.bvid,
-      cid: ref.cid,
-      pageIndex: Number(ref.pageIndex) > 0 ? Number(ref.pageIndex) : 1,
-      pageTitle: ref.pageTitle
-    };
+  if (!ref.isVideoContext || !ref.videoId) {
+    return { url: ref.url, videoId: ref.videoId };
   }
-
-  const videoMeta = await fetchBiliVideoMetaByBvid(ref.bvid);
-  const page = pickPageForAiContext(videoMeta.pages, ref);
-  const pageIndex = Number(page?.page || ref.pageIndex || extractPageIndexFromUrl(ref.url) || 1) || 1;
   return {
-    url: buildCanonicalVideoUrl(ref.bvid, pageIndex) || ref.url,
-    bvid: ref.bvid,
-    cid: String(page?.cid || ref.cid || "").trim(),
-    pageIndex,
-    pageTitle: String(page?.part || ref.pageTitle || "").trim()
+    url: buildCanonicalVideoUrl(ref.videoId) || ref.url,
+    videoId: ref.videoId
   };
 }
 
@@ -897,10 +700,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     let readerUrl = "";
     try {
       const parsed = new URL(url);
-      if (parsed.hostname !== "www.bilibili.com") {
-        throw new Error("当前网页不是 B 站视频页");
+      if (!parsed.hostname.includes("youtube.com") && parsed.hostname !== "youtu.be") {
+        throw new Error("当前网页不是 YouTube 视频页");
       }
-      parsed.searchParams.set("boc_reader", "1");
+      parsed.searchParams.set("yoc_reader", "1");
       readerUrl = parsed.toString();
     } catch (error) {
       sendResponse({ ok: false, error: error.message || "阅读视图地址无效" });
@@ -919,6 +722,207 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // 🎯 核心入口：用 ANDROID client POST /youtubei/v1/player
+  // 这是唯一能拿到**不带 exp=xpe 参数**的 timedtext URL 的方式
+  // ytInitialPlayerResponse 里的 baseUrl 带 exp=xpe，fetch 会返回空 body
+  if (message.type === "get-android-player-data") {
+    (async () => {
+      const videoId = String(message.videoId || "").trim();
+      const apiKey = String(message.apiKey || "").trim();
+      if (!videoId) { sendResponse({ ok: false, error: "Missing videoId" }); return; }
+      if (!apiKey) { sendResponse({ ok: false, error: "Missing apiKey" }); return; }
+
+      const url = `https://www.youtube.com/youtubei/v1/player?key=${apiKey}&prettyPrint=false`;
+      const body = {
+        context: {
+          client: { clientName: "ANDROID", clientVersion: "20.10.38" }
+        },
+        videoId
+      };
+
+      try {
+        console.log("[YOC BG] POST player API (ANDROID)", { videoId });
+        const resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          cache: "no-store"
+        });
+        if (!resp.ok) {
+          sendResponse({ ok: false, error: `HTTP ${resp.status}` });
+          return;
+        }
+        const data = await resp.json();
+        if (data?.playabilityStatus?.status !== "OK") {
+          sendResponse({ ok: false, error: `playability: ${data?.playabilityStatus?.status}` });
+          return;
+        }
+
+        const d = data.videoDetails || {};
+        const tracks = data.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+
+        console.log("[YOC BG] ANDROID player success", {
+          title: d.title,
+          tracks: tracks.length,
+          urls_have_exp: tracks.map(t => t.baseUrl?.includes("exp=xpe")).join(",")
+        });
+
+        sendResponse({
+          ok: true,
+          data: {
+            videoDetails: {
+              title: d.title || "",
+              author: d.author || "",
+              channelId: d.channelId || "",
+              lengthSeconds: d.lengthSeconds || "0",
+              shortDescription: d.shortDescription || "",
+              videoId: d.videoId || videoId,
+              isLiveContent: d.isLiveContent || false,
+              thumbnailUrl: d.thumbnail?.thumbnails?.slice(-1)[0]?.url || ""
+            },
+            captionTracks: tracks.map((t) => ({
+              vssId: t.vssId || "",
+              baseUrl: t.baseUrl || "",
+              name: t.name?.simpleText || t.name?.runs?.map(r => r.text).join("") || t.name || "",
+              languageCode: t.languageCode || "",
+              kind: t.kind || ""
+            }))
+          }
+        });
+      } catch (error) {
+        console.error("[YOC BG] ANDROID player error:", error);
+        sendResponse({ ok: false, error: String(error?.message || error) });
+      }
+    })();
+    return true;
+  }
+
+  // 统一入口：从 YouTube 页面一站式获取 playerResponse（精简字段）+ 字幕
+  if (message.type === "get-youtube-data") {
+    (async () => {
+      const tabId = Number(sender?.tab?.id || 0) || 0;
+      if (!tabId) { sendResponse({ ok: false, error: "Missing tabId" }); return; }
+      if (!chrome.scripting) { sendResponse({ ok: false, error: "chrome.scripting not available" }); return; }
+
+      let results;
+      try {
+        results = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: () => {
+            // 只提取必要字段，避免 structured clone 大对象（几 MB）静默失败
+            // 返回一个纯数据 plain object
+            try {
+              const r = window.ytInitialPlayerResponse;
+              if (!r) return null;
+              const d = r.videoDetails || {};
+              const tracks =
+                r.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+              return {
+                videoDetails: {
+                  title: d.title || "",
+                  author: d.author || "",
+                  channelId: d.channelId || "",
+                  lengthSeconds: d.lengthSeconds || "0",
+                  shortDescription: d.shortDescription || "",
+                  videoId: d.videoId || "",
+                  isLiveContent: d.isLiveContent || false,
+                  thumbnailUrl: d.thumbnail?.thumbnails?.slice(-1)[0]?.url || ""
+                },
+                captionTracks: tracks.map((t) => ({
+                  vssId: t.vssId || "",
+                  baseUrl: t.baseUrl || "",
+                  name: t.name?.simpleText || t.name || "",
+                  languageCode: t.languageCode || "",
+                  kind: t.kind || "" // "asr" = 自动字幕
+                }))
+              };
+            } catch (e) {
+              return { __error__: String(e?.message || e) };
+            }
+          }
+        });
+      } catch (e) {
+        console.error("[YOC BG] executeScript failed", e);
+        sendResponse({ ok: false, error: "executeScript 失败: " + (e?.message || e) });
+        return;
+      }
+
+      const extracted = results?.[0]?.result;
+      if (!extracted || extracted.__error__) {
+        console.warn("[YOC BG] MAIN world 提取失败", extracted);
+        sendResponse({ ok: false, error: "无法从页面获取 playerResponse" });
+        return;
+      }
+      const videoDetails = extracted.videoDetails || {};
+      const captionTracks = extracted.captionTracks || [];
+
+      // get-youtube-data handler 只返回 tracks 元数据（不带 body），
+      // body 由 fetchSubtitleBody 按需通过 fetch-json handler 获取（更灵活）
+
+      console.log("[YOC BG] get-youtube-data success", {
+        title: videoDetails.title,
+        tracks: captionTracks.length
+      });
+
+      sendResponse({
+        ok: true,
+        data: {
+          videoDetails,
+          tracks: captionTracks
+        }
+      });
+    })();
+    return true;
+  }
+
+  if (message.type === "get-youtube-player-response") {
+    // 兼容旧调用
+    (async () => {
+      const tabId = Number(sender?.tab?.id || 0) || 0;
+      if (!tabId) { sendResponse({ ok: false, error: "Missing tabId" }); return; }
+      if (!chrome.scripting) { sendResponse({ ok: false, error: "chrome.scripting not available" }); return; }
+      try {
+        const results = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: () => {
+            try {
+              const r = window.ytInitialPlayerResponse;
+              if (!r) return null;
+              const d = r.videoDetails || {};
+              const tracks = r.captions?.playerCaptionsTracklistRenderer?.captionTracks || [];
+              return {
+                videoDetails: {
+                  title: d.title || "",
+                  author: d.author || "",
+                  channelId: d.channelId || "",
+                  lengthSeconds: d.lengthSeconds || "0",
+                  shortDescription: d.shortDescription || "",
+                  videoId: d.videoId || "",
+                  isLiveContent: d.isLiveContent || false,
+                  thumbnailUrl: d.thumbnail?.thumbnails?.slice(-1)[0]?.url || ""
+                },
+                captionTracks: tracks.map((t) => ({
+                  vssId: t.vssId || "",
+                  baseUrl: t.baseUrl || "",
+                  name: t.name?.simpleText || t.name || "",
+                  languageCode: t.languageCode || "",
+                  kind: t.kind || ""
+                }))
+              };
+            } catch (e) { return null; }
+          }
+        });
+        const data = results?.[0]?.result || null;
+        sendResponse({ ok: Boolean(data), data });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e?.message || e) });
+      }
+    })();
+    return true;
+  }
+
   if (message.type === "fetch-json") {
     const url = typeof message.url === "string" ? message.url : "";
     if (!url) {
@@ -926,29 +930,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
 
-    const isBiliRequest = /(?:api\.bilibili\.com|hdslb\.com)/.test(url);
-    const headers = new Headers();
-    if (isBiliRequest) {
-      headers.set("Accept", "application/json, text/plain, */*");
-      headers.set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
-      headers.set("Cache-Control", "no-cache");
-      headers.set("Pragma", "no-cache");
-    }
-
-    const fetchOptions = {
+    fetch(url, {
       method: "GET",
       credentials: "include",
       cache: "no-store"
-    };
-    if (headers.size > 0) {
-      fetchOptions.headers = headers;
-    }
-    if (isBiliRequest) {
-      fetchOptions.referrer = "https://www.bilibili.com/";
-      fetchOptions.referrerPolicy = "strict-origin-when-cross-origin";
-    }
-
-    fetch(url, fetchOptions)
+    })
       .then(async (response) => {
         if (!response.ok) {
           sendResponse({ ok: false, error: `HTTP ${response.status}` });
@@ -956,11 +942,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
 
         const text = await response.text();
+        if (!text || !text.trim()) {
+          sendResponse({ ok: false, error: "响应为空" });
+          return;
+        }
         try {
           const data = JSON.parse(text);
-          sendResponse({ ok: true, data });
+          sendResponse({ ok: true, data, text, isJson: true });
         } catch {
-          sendResponse({ ok: false, error: "Invalid JSON response" });
+          // 不是 JSON（可能是 XML srv3 格式的字幕），返回原始文本
+          sendResponse({ ok: true, data: null, text, isJson: false });
         }
       })
       .catch((error) => sendResponse({ ok: false, error: error.message }));
@@ -1588,7 +1579,7 @@ function buildAiMessages({ context, userPrompt, history, systemPrompt }) {
   const hasVideoContext = Boolean(ctx.isVideoContext);
   const sections = hasVideoContext
     ? [
-        `你是一个 B 站视频助手。当前用户正在看一个视频，标题：「${ctx.title || "未知"}」`,
+        `你是一个 YouTube 视频助手。当前用户正在看一个视频，标题：「${ctx.title || "未知"}」`,
         `作者：${ctx.author || "未知"} | 上传日期：${ctx.uploadDate || "未知"}`
       ]
     : [

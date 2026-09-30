@@ -556,11 +556,11 @@
   object-fit: contain;
 }
 
-.boc-reading-player-slot #bilibili-player,
-.boc-reading-player-slot .bpx-player-container,
-.boc-reading-player-slot .bpx-player-video-area,
-.boc-reading-player-slot .bpx-player-primary-area,
-.boc-reading-player-slot .bpx-player-inner {
+.boc-reading-player-slot #movie_player,
+.boc-reading-player-slot #player,
+.boc-reading-player-slot .ytp-video,
+.boc-reading-player-slot .ytp-video,
+.boc-reading-player-slot .ytp-nonexistent-player-inner {
   width: 100% !important;
   height: 100% !important;
 }
@@ -815,14 +815,14 @@ body[data-boc-reader-mode="1"] .boc-reader-player-host {
   background: #000 !important;
 }
 
-body[data-boc-reader-mode="1"] #playerWrap {
+body[data-boc-reader-mode="1"] #player {
   position: static !important;
   top: auto !important;
   z-index: auto !important;
   background: transparent !important;
 }
 
-body[data-boc-reader-mode="1"] .player-wrap,
+body[data-boc-reader-mode="1"] .html5-video-container,
 body[data-boc-reader-mode="1"] .scroll-sticky {
   position: static !important;
   top: auto !important;
@@ -1174,14 +1174,14 @@ body[data-boc-reader-mode="1"][data-boc-reader-transcript-visible="0"] #boc-read
   color: var(--boc-reader-text);
 }
 
-body[data-boc-reading-active="1"] .boc-reader-player-host .bpx-player-subtitle-wrap,
-body[data-boc-reading-active="1"] .boc-reader-player-host .bpx-player-subtitle-panel,
-body[data-boc-reading-active="1"] .boc-reader-player-host .bpx-player-subtitle-container,
-body[data-boc-reading-active="1"] .boc-reader-player-host .bilibili-player-video-subtitle,
+body[data-boc-reading-active="1"] .boc-reader-player-host .ytp-nonexistent-subtitle-wrap,
+body[data-boc-reading-active="1"] .boc-reader-player-host .ytp-nonexistent-subtitle-panel,
+body[data-boc-reading-active="1"] .boc-reader-player-host .ytp-nonexistent-subtitle-container,
+body[data-boc-reading-active="1"] .boc-reader-player-host .ytp-nonexistent-video-subtitle,
 body[data-boc-reading-active="1"] .boc-reader-player-host .subtitle-wrap,
 body[data-boc-reading-active="1"] .boc-reader-player-host [class*="subtitle"],
-body[data-boc-reading-active="1"] .boc-reader-player-host .bpx-player-sending-bar,
-body[data-boc-reading-active="1"] .bpx-player-sending-bar {
+body[data-boc-reading-active="1"] .boc-reader-player-host .ytp-nonexistent-sending-bar,
+body[data-boc-reading-active="1"] .ytp-nonexistent-sending-bar {
   display: none !important;
 }
 
@@ -1477,8 +1477,8 @@ body[data-boc-reader-mode="1"][data-boc-reader-chapter-visibility="auto"][data-b
 
 body[data-boc-reader-mode="1"] .left-container,
 body[data-boc-reader-mode="1"] .scroll-sticky,
-body[data-boc-reader-mode="1"] #playerWrap,
-body[data-boc-reader-mode="1"] .player-wrap,
+body[data-boc-reader-mode="1"] #player,
+body[data-boc-reader-mode="1"] .html5-video-container,
 body[data-boc-reader-mode="1"] h1.video-title,
 body[data-boc-reader-mode="1"] .video-info-container,
 body[data-boc-reader-mode="1"] #viewbox_report,
@@ -1525,8 +1525,8 @@ body[data-boc-reader-mode="1"] #boc-reading-inline-host::before {
   background: var(--boc-reader-surface-2);
 }
 
-body[data-boc-reader-mode="1"] #playerWrap,
-body[data-boc-reader-mode="1"] .player-wrap {
+body[data-boc-reader-mode="1"] #player,
+body[data-boc-reader-mode="1"] .html5-video-container {
   border: 1px solid var(--boc-reader-border);
   border-bottom: 0;
   border-radius: 0;
@@ -1539,16 +1539,16 @@ body[data-boc-reader-mode="1"] .player-wrap {
   max-height: var(--boc-reader-player-rendered-height, none) !important;
 }
 
-body[data-boc-reader-mode="1"] #playerWrap > *,
-body[data-boc-reader-mode="1"] .player-wrap > *,
-body[data-boc-reader-mode="1"] #playerWrap .bpx-player-container,
-body[data-boc-reader-mode="1"] #playerWrap .bpx-player-video-area,
-body[data-boc-reader-mode="1"] #playerWrap .bpx-player-primary-area,
-body[data-boc-reader-mode="1"] #playerWrap .bpx-player-inner,
-body[data-boc-reader-mode="1"] .player-wrap .bpx-player-container,
-body[data-boc-reader-mode="1"] .player-wrap .bpx-player-video-area,
-body[data-boc-reader-mode="1"] .player-wrap .bpx-player-primary-area,
-body[data-boc-reader-mode="1"] .player-wrap .bpx-player-inner {
+body[data-boc-reader-mode="1"] #player > *,
+body[data-boc-reader-mode="1"] .html5-video-container > *,
+body[data-boc-reader-mode="1"] #player #player,
+body[data-boc-reader-mode="1"] #player .ytp-video,
+body[data-boc-reader-mode="1"] #player .ytp-video,
+body[data-boc-reader-mode="1"] #player .ytp-nonexistent-player-inner,
+body[data-boc-reader-mode="1"] .html5-video-container #player,
+body[data-boc-reader-mode="1"] .html5-video-container .ytp-video,
+body[data-boc-reader-mode="1"] .html5-video-container .ytp-video,
+body[data-boc-reader-mode="1"] .html5-video-container .ytp-nonexistent-player-inner {
   width: 100% !important;
   max-width: 100% !important;
   height: 100% !important;
@@ -1638,8 +1638,8 @@ body[data-boc-reader-mode="1"] #boc-reading-inline-host::-webkit-scrollbar-thumb
 
   body[data-boc-reader-mode="1"] .left-container,
   body[data-boc-reader-mode="1"] .scroll-sticky,
-  body[data-boc-reader-mode="1"] #playerWrap,
-  body[data-boc-reader-mode="1"] .player-wrap,
+  body[data-boc-reader-mode="1"] #player,
+  body[data-boc-reader-mode="1"] .html5-video-container,
   body[data-boc-reader-mode="1"] h1.video-title,
   body[data-boc-reader-mode="1"] .video-info-container,
   body[data-boc-reader-mode="1"] #viewbox_report,
@@ -1649,10 +1649,10 @@ body[data-boc-reader-mode="1"] #boc-reading-inline-host::-webkit-scrollbar-thumb
   }
 }
 
-body[data-boc-reader-mode="1"] .bpx-player-mini-warp,
-body[data-boc-reader-mode="1"] .bpx-player-mini-close,
-body[data-boc-reader-mode="1"] .bpx-player-ending-panel,
-body[data-boc-reader-mode="1"] .bpx-player-ending-related,
+body[data-boc-reader-mode="1"] .ytp-nonexistent-mini-warp,
+body[data-boc-reader-mode="1"] .ytp-nonexistent-mini-close,
+body[data-boc-reader-mode="1"] .ytp-endscreen-content,
+body[data-boc-reader-mode="1"] .ytp-endscreen-content,
 body[data-boc-reader-mode="1"] .ad-report,
 body[data-boc-reader-mode="1"] [class*="ad-report"],
 body[data-boc-reader-mode="1"] [class*="mini-player"],

@@ -65,7 +65,7 @@ function bindEvents() {
       setMessage("没有可下载字幕。");
       return;
     }
-    const safeTitle = sanitizeFileName(payload.title || "bilibili-subtitle");
+    const safeTitle = sanitizeFileName(payload.title || "youtube-subtitle");
     const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -91,7 +91,7 @@ function bindEvents() {
   el.readingViewBtn?.addEventListener("click", async () => {
     const tab = await getActiveTab();
     if (!isSupportedSubtitlePage(tab?.url || "")) {
-      setMessage("请先打开一个 B 站视频页。");
+      setMessage("请先打开一个 YouTube视频页。");
       return;
     }
 
@@ -174,7 +174,7 @@ async function refreshFromTab() {
   setStatus("正在抓取...");
   const resp = await sendToContent({ type: "popup-refresh" });
   if (!resp?.ok) {
-    const errorText = (resp?.error || "请在 B 站视频页使用。").replace(
+    const errorText = (resp?.error || "请在 YouTube视频页使用。").replace(
       "请刷新浏览器网页重试，或当前网页不支持",
       "请刷新网页重试，或当前网页不支持"
     );
@@ -303,7 +303,7 @@ async function sendToContent(message) {
     }
 
     const normalizedError = normalizeContentErrorMessage(error);
-    setStatus("请在 B 站视频页使用插件。");
+    setStatus("请在 YouTube视频页使用插件。");
     setMessage(normalizedError);
     return { ok: false, error: normalizedError, payload: latestPayload };
   }
@@ -325,12 +325,14 @@ function shouldRetryAfterInjection(error) {
 function isSupportedSubtitlePage(url) {
   try {
     const parsed = new URL(String(url || ""));
-    if (parsed.hostname !== "www.bilibili.com") {
+    if (parsed.hostname === "youtu.be") {
+      return Boolean(parsed.pathname.match(/^\/[a-zA-Z0-9_-]{11}/));
+    }
+    if (!parsed.hostname.includes("youtube.com")) {
       return false;
     }
-    return parsed.pathname === "/list/watchlater" ||
-      parsed.pathname === "/list/watchlater/" ||
-      parsed.pathname.startsWith("/video/");
+    return parsed.pathname.startsWith("/watch") ||
+      parsed.pathname.startsWith("/shorts/");
   } catch {
     return false;
   }
@@ -373,7 +375,7 @@ async function probeContentScriptVersion(tabId) {
   try {
     const probe = await chrome.scripting.executeScript({
       target: { tabId },
-      func: () => globalThis.__BOC_CONTENT_SCRIPT_LOADED__ || ""
+      func: () => globalThis.__YOC_CONTENT_SCRIPT_LOADED__ || ""
     });
     return String(probe?.[0]?.result || "");
   } catch {
