@@ -3,15 +3,11 @@
   "name": "YouTube Obsidian Clipper｜一键保存YouTube字幕",
   "version": "1.0.0",
   "description": "在 YouTube 视频页抓取字幕，预览后一键保存到 Obsidian。",
-  
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "youtube-obsidian-clipper@github.com",
-      "strict_min_version": "109.0"
-    }
-  },
-  
-  "permissions": ["storage", "scripting", "sidePanel"],
+  "permissions": [
+    "storage",
+    "scripting",
+    "sidePanel"
+  ],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://*.youtube.com/*",
@@ -49,8 +45,12 @@
         "https://www.youtube.com/shorts/*",
         "https://youtu.be/*"
       ],
-      "js": ["content.js"],
-      "css": ["content.css"],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
       "run_at": "document_idle"
     }
   ],
